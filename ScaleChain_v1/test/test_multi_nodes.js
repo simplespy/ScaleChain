@@ -1,8 +1,9 @@
 var Web3 = require('web3');
 var ScaleChain = artifacts.require("./ScaleChain.sol");
 var crypto = require("crypto");
-
-
+const start = Date.now();
+var blocks = [];
+var max_length = 8;
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -34,49 +35,31 @@ async function receiveBlocks(node_account, instance) {
     var sig = await signBlock(tx_bytes, node_account);
     await instance.SendBlock(tx_bytes, sig);
     var updated_hash = await instance.getCurrentHash();
-    console.log(updated_hash);
+    //console.log(updated_hash);
     return [tx_bytes, sig, updated_hash];
     
 }
 
+async function runMainNode(account, instance) {
+    while (true) {
+        var block = await receiveBlocks(account, instance);
+        await sleep(3000);
+        blocks.push(block);
+        console.log("Block[", blocks.length, "]: ", Date.now() - start, ' from ', account);
+        if (blocks.length >= max_length) break;
+        
+    }
+}
+
 contract("ScaleChain", function(accounts) {
-    it ("Test 1: initializes with accounts", function() {
-        return ScaleChain.deployed().then(function(instance) {
-            return instance.mainNodesCount();
-        }).then(function(count) {
-            assert.equal(count.toNumber(), 5);
-        });
-    });
-
-    it("Test 2: add account", function() {
-        ScaleChain.deployed().then(function(instance) {
-            web3.eth.defaultAccount = accounts[0];
-            instance.addMainNode(accounts[5]);
-            return instance.mainNodesCount();
-        }).then(function(count) {
-            assert.equal(count.toNumber(), 6);
-        });
-    });
-
-    it("Test 3: signing blocks", async function() {
-        var instance = await ScaleChain.deployed();
-        var tx_bytes = "deadbeef";
-        var sig = await signBlock(tx_bytes, accounts[0]);
-        var result = await instance.recoverSigner.call(tx_bytes, sig);
-        assert.equal(result, accounts[0]);
-    });
-
     it("Test 4: updating hash", async function() {
         var instance = await ScaleChain.deployed();
         var init_hash = Buffer.alloc(32);
-        var blocks = [];
-        
-        while (true) {
-            var block = await receiveBlocks(accounts[0], instance);
-            await sleep(2000);
-            blocks.push(block);
-            if (blocks.length >= 10) break;
-        }
-        validateHash(init_hash, blocks);
+        //await runMainNode(accounts[1], instance);
+        await Promise.all([
+            runMainNode(accounts[0], instance), 
+            runMainNode(accounts[1], instance),
+            ]);
+        //validateHash(init_hash, blocks);
     });
 });
