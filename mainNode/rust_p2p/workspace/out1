@@ -1,0 +1,27 @@
+Performer started
+listener started
+127.0.0.1:40001 send ApiMessage::ServerConnect to 127.0.0.1:40000. attempt 1
+api connects to 127.0.0.1:40000
+std::net::TcpStream::connect_timeout
+return 
+ConnectResult::Fail "127.0.0.1:40000"
+127.0.0.1:40001 send ApiMessage::ServerConnect to 127.0.0.1:40000. attempt 2
+api connects to 127.0.0.1:40000
+std::net::TcpStream::connect_timeout
+return 
+ConnectResult::Fail "127.0.0.1:40000"
+127.0.0.1:40001 send ApiMessage::ServerConnect to 127.0.0.1:40000. attempt 3
+api connects to 127.0.0.1:40000
+std::net::TcpStream::connect_timeout
+return 
+ConnectResult::Fail "127.0.0.1:40000"
+127.0.0.1:40001 send ApiMessage::ServerConnect to 127.0.0.1:40000. attempt 4
+api connects to 127.0.0.1:40000
+std::net::TcpStream::connect_timeout
+return 
+ConnectResult::Fail "127.0.0.1:40000"
+127.0.0.1:40001 send ApiMessage::ServerConnect to 127.0.0.1:40000. attempt 5
+api connects to 127.0.0.1:40000
+std::net::TcpStream::connect_timeout
+return 
+ConnectResult::Fail "127.0.0.1:40000"

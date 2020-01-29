@@ -1,0 +1,29 @@
+Performer started
+listener started
+127.0.0.1:40000 send ApiMessage::ServerConnect to 127.0.0.1:40001. attempt 1
+127.0.0.1:40000 connected to 127.0.0.1:40001 : 127.0.0.1:54685
+127.0.0.1:40000 registered peer 127.0.0.1:40001, peer token 2, local token 3
+connect success
+start periodically send ping message
+receive Pong pong
+tcp registered 127.0.0.1:54686 due to listen
+127.0.0.1:40000 registered peer 127.0.0.1:54686, peer token 4, local token 5
+receive Ping hello1
+receive Pong pong
+receive Ping hello2
+receive Pong pong
+receive Ping hello3
+receive Pong pong
+receive Ping hello4
+receive Pong pong
+receive Ping hello5
+receive Pong pong
+receive Ping hello6
+receive Pong pong
+receive Ping hello7
+receive Pong pong
+receive Ping hello8
+receive Pong pong
+receive Ping hello9
+receive Pong pong
+receive Ping hello10
