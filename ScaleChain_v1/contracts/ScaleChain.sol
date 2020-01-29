@@ -4,21 +4,18 @@ pragma experimental ABIEncoderV2;
 contract ScaleChain {
     MainNode[] public main_nodes;
     mapping(address => bool) is_mainNode;
-    bytes32 curr_hash;
+    bytes32 public curr_hash;
+    uint public block_id;
 
     struct MainNode {
         address id;
         bytes32 pubkey;
     }
 
-    struct SendResult {
-        bool result; //success or not
-        bytes32 tx_hash; //maybe useful
-    }
-
     // Initialize MainNodes so that a sender of a new block
     // has to be one of the mainNode
     constructor(address[] main_node_addresses) public {
+        block_id = 0;
         for (uint i = 0; i < main_node_addresses.length; ++i) {
             main_nodes.push(MainNode({
                 id: main_node_addresses[i],
@@ -51,45 +48,37 @@ contract ScaleChain {
             currentHash = curr_hash;
     }
 
+    function getBlockID() public view
+        returns (uint uid) {
+            uid = block_id;
+    }
+
     // Get # of Ether nodes
     function mainNodesCount() public view
         returns (uint number_of_mainNodes) {
             number_of_mainNodes = main_nodes.length;
     }
-
-    function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
-        require(sig.length == 65);
-        assembly {
-            r := mload(add(sig, 32))
-            s := mload(add(sig, 64))
-            v := byte(0, mload(add(sig, 96)))
-        }
-        v = v + 27;
-    }
     
-    // compute hash
-    function SendBlock(string tx_bytes, bytes memory sig) public returns (SendResult) {
+    // signature = {side_chain_block, msg_hash, v, r, s}
+    function SendBlock(string side_chain_block, bytes32 msg_hash, uint8 v, bytes32 r, bytes32 s, uint new_block_id) public returns (bool) {
         
         // 1.check signed by one of mainNode
-        address signer_address = recoverSigner(tx_bytes, sig);
+        //address signer_address = ecrecover(msg_hash, v, r, s);
+        //require (is_mainNode[signer_address]);
 
-        require (is_mainNode[signer_address]);
-        
+        //Check whether the new_block_id = block_id + 1. If not, reject the block. 
+        if (block_id + 1 != new_block_id) return false;
+
         // 2. update hash tentative codes
-        bytes32 new_hash = sha256(abi.encodePacked(curr_hash, sha256(tx_bytes)));
+        bytes32 new_hash = sha256(abi.encodePacked(curr_hash, sha256(side_chain_block)));
         curr_hash = new_hash;
-        
-        // 3. publish the curr_hash as part of transaction   
-        bool publish_result = address(this).call();
-        return SendResult({result: publish_result, tx_hash: curr_hash});
+        block_id = block_id + 1;
+        return true;
     }
 
-    function recoverSigner(string tx_bytes, bytes memory sig) returns (address signer_address) {
-        bytes memory prefix = "\x19Ethereum Signed Message:\n32";
-        bytes32 prefixedHash = sha3(prefix, sha3(tx_bytes));
-        (uint8 v, bytes32 r, bytes32 s) = splitSignature(sig);
-        signer_address = ecrecover(prefixedHash, v, r, s);
-    }
+function test(bytes32 msg_hash, uint8 v, bytes32 r, bytes32 s) public returns (address signer_address) {
+    signer_address = ecrecover(msg_hash, v, r, s);
+}
 
 
     

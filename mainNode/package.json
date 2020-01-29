@@ -1,0 +1,10 @@
+{
+  "name": "mainNode_1",
+  "version": "1.0.0",
+  "description": "",
+  "dependencies": {
+    "ethereumjs-tx": "^2.1.1",
+    "web3": "^1.2.2",
+    "yargs": "^15.1.0"
+  }
+}
