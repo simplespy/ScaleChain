@@ -3,18 +3,14 @@ use super::block::{Block};
 use std::sync::{Mutex, Arc};
 use std::collections::{HashMap};
 
-
-
 pub struct BlockDb {
-    block_db: HashMap<H256, Block>, //blockhash -> Block  
-    orphaned_blocks: HashMap<H256, Block>, 
+    block_db: HashMap<H256, Block>, //curr_hash -> Block  
 }
 
 impl BlockDb {
     pub fn new() -> BlockDb{
         BlockDb {
             block_db: HashMap::new(), 
-            orphaned_blocks: HashMap::new(), 
         }  
     }
     

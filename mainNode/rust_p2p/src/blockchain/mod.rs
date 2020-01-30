@@ -1,4 +1,5 @@
 use super::primitive::{hash, block};
+use super::contract;
 
 
 pub mod blockchain;

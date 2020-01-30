@@ -3,6 +3,12 @@ use super::hash::{H256};
 use super::crypto::{self};
 use super::merkle::{MerkleHash};
 
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, Default, PartialEq, Eq)]
+pub struct MainNodeBlock {
+     pub curr_hash: H256,
+     pub block: Block,
+     pub block_id: usize,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Default, PartialEq, Eq)]
 pub struct Block {

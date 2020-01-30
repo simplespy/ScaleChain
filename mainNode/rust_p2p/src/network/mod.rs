@@ -8,6 +8,7 @@ pub mod performer;
 use super::primitive;
 use super::db::{blockDb, utxoDb};
 use super::blockchain;
+use super::contract;
 
 
 pub const MSG_BUF_SIZE: usize = 1024;

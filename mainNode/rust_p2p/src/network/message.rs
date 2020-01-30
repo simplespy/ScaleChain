@@ -1,14 +1,13 @@
 use serde::{Serialize, Deserialize};
 use mio_extras::channel::{self, Sender};
 use std::sync::mpsc::{self};
-use super::primitive::block::{Block, Transaction};
+use super::primitive::block::{Block, Transaction, MainNodeBlock};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
     Ping(String),
     Pong(String),
-    NewBlock(Block),
-    NewTransaction(Transaction),
+    SyncBlock(MainNodeBlock),
 }
 
 #[derive(Debug, Clone)]

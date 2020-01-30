@@ -7,6 +7,7 @@ mod crypto;
 mod primitive;
 mod db;
 mod blockchain;
+mod contract;
 
 use std::{thread, time};
 use std::sync::mpsc::{self};
@@ -19,6 +20,7 @@ use network::message::{Message};
 use network::performer::{Performer};
 use db::blockDb::{BlockDb};
 use blockchain::blockchain::{BlockChain};
+use contract::Contract;
 use std::sync::{Arc, Mutex};
 use api::apiServer::ApiServer;
 use api::transactionGenerator::{TransactionGenerator};
@@ -47,12 +49,14 @@ fn main() {
     let api_port: String = "127.0.0.1:40002".to_string();
     let block_db = Arc::new(Mutex::new(BlockDb::new()));
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
+    let contract = Arc::new(Mutex::new(Contract::new()));
 
     let (task_sender, task_receiver) = mpsc::channel();
     let (server_api_sender, server_api_receiver) = channel::channel();
 
     let mut performer = Performer::new(
         task_receiver, 
+        contract.clone(),
         blockchain.clone(), 
         block_db.clone()
     );
@@ -113,7 +117,7 @@ fn main() {
     }
    
 
-    let mut tx_gen = TransactionGenerator::new();
+    //let mut tx_gen = TransactionGenerator::new();
     println!("start periodically send ping message");
     let mut text_i = 0;
     loop {
@@ -123,18 +127,16 @@ fn main() {
             let performer_message = Message::Ping(text);
             let control_message = ApiMessage::ServerBroadcast(performer_message);
             server_api_sender.send(control_message).expect("broadcast to peer");
+
+            // web 3
+            // 1. interact with smartContract
+             
+            // 2. Broadcast to all peers
+
             
-            //let mut transactions: Vec<Transaction> = tx_gen.generate_trans(1); 
-            //for tx in transactions.iter() {
-                //server_api_sender.send(ApiMessage::CreatedTransaction(tx.clone()));
-                //let p2p_message = Message::NewTransaction(tx.clone());
-                //let transactions_message = ApiMessage::ServerBroadcast(p2p_message);
-                //println!("send broadcast message");
-                //server_api_sender.send(transactions_message);
-            //}
-            // random sleep
+            // sleep
             let num = rand::thread_rng().gen_range(0, 50);
-            let sleep_time = time::Duration::from_millis(1000);
+            let sleep_time = time::Duration::from_millis(1000); //num
             thread::sleep(sleep_time);
         }
     }

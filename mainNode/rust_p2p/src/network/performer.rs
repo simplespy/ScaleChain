@@ -5,25 +5,27 @@ use mio_extras::channel::{self};
 use std::thread;
 use super::blockDb::{BlockDb};
 use super::blockchain::blockchain::{BlockChain};
+use super::contract::{Contract, ContractState};
 use std::sync::{Arc, Mutex};
 
 pub struct Performer {
     task_source: mpsc::Receiver<TaskRequest>,
-    chain: Arc<Mutex<BlockChain>>,
+    contract: Arc<Mutex<Contract>>,
+    chain: Arc<Mutex<BlockChain>>, // may not use chain at all
     block_db: Arc<Mutex<BlockDb>>,
 }
-
-
 
 impl Performer {
     pub fn new(
         task_source: mpsc::Receiver<TaskRequest>, 
+        contract: Arc<Mutex<Contract>>,
         blockchain: Arc<Mutex<BlockChain>>,
         block_db: Arc<Mutex<BlockDb>>,
          
     ) -> Performer {
         Performer {
             task_source,
+            contract: contract,
             chain: blockchain,
             block_db: block_db,
         } 
@@ -51,21 +53,22 @@ impl Performer {
                 Message::Pong(info_msg) => {
                     println!("receive Pong {}", info_msg);                  
                 },
-                Message::NewBlock(block) => {
+                Message::SyncBlock(main_node_block) => {
+                    let contract_state = ContractState {
+                        curr_hash: main_node_block.curr_hash,
+                        block_id: main_node_block.block_id,
+                    };
+                    // TODO check, curr_hash and block are coherent
+                    // 1. compute curr_hash locally using all prev blocks stored in block_db
+                    // 2. if some blocks are not present, use get_block function to retrieve from
+                    //    eth archive node, need some search
+
 
                     let mut block_db = self.block_db.lock().unwrap();
-                    block_db.insert(&block);
+                    block_db.insert(&main_node_block.block);
                     let mut chain = self.chain.lock().unwrap();
-                    chain.insert(&block.header);
-                    println!("blockchain height {}, latest hash {:?}", chain.get_height(), chain.latest_hash);
-                },
-                Message::NewTransaction(transaction) => {
-                    // check if transactin is valid TODO
-                    //
-                    //
-                    
-                    //let mut mempool = self.mempool.lock().unwrap();
-                    //mempool.insert(transaction);
+                    chain.insert(&contract_state);
+                    println!("contract state {:?}", contract_state);
                 },
             }
         } 
