@@ -11,14 +11,14 @@ pub struct ContractState {
 }
 
 pub struct Contract {
-    contract: EthContract<web3::transports::Http>,
-    contract_address: Address,
+    //contract: EthContract<web3::transports::Http>,
+    //contract_address: Address,
     rpc_url: String,
-    my_account: Account, 
-    contract_state: ContractState,
+    //my_account: Account, 
+    //contract_state: ContractState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Account {
     account: Address,
     //private_key: 
@@ -27,10 +27,11 @@ pub struct Account {
 impl Contract {
     // TODO https://github.com/tomusdrw/rust-web3/blob/master/examples/contract.rs
     pub fn new() -> Contract {
-        let rpc_url = "hello".to_string();
+        let rpc_url = "https://ropsten.infura.io/v3/fd7fd90847cd4ca99ce886d4bffdccf8".to_string();
         let (eloop, http) = web3::transports::Http::new(&rpc_url).unwrap();
         eloop.into_remote();
-        unimplemented!()
-        //Contract()
+        Contract {
+            rpc_url:  rpc_url,
+        }
     }
 }
