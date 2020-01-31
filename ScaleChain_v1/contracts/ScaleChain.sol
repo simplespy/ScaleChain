@@ -38,7 +38,7 @@ contract ScaleChain {
     }
 
     // Get Ether node addresses
-    function getMainNodes(uint id) public view
+    function getMainNode(uint id) public view
         returns (address main_node_address) {
             main_node_address = main_nodes[id].id;
     }
@@ -58,27 +58,40 @@ contract ScaleChain {
         returns (uint number_of_mainNodes) {
             number_of_mainNodes = main_nodes.length;
     }
+
+    function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
+        require(sig.length == 65);
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
+        if (v < 27) v = v + 27;
+    }
     
-    // signature = {side_chain_block, msg_hash, v, r, s}
-    function SendBlock(string side_chain_block, bytes32 msg_hash, uint8 v, bytes32 r, bytes32 s, uint new_block_id) public returns (bool) {
+    function recoverSigner(string block, bytes sig) returns (address signer_address) {
+        bytes memory prefix = "\x19Ethereum Signed Message:\n32";
+        bytes32 prefixedHash = sha3(prefix, sha3(block));
+        (uint8 v, bytes32 r, bytes32 s) = splitSignature(sig);
+        signer_address = ecrecover(prefixedHash, v, r, s);
+    }
+    
+    function sendBlock(string side_chain_block, bytes signature, uint new_block_id) public {
         
         // 1.check signed by one of mainNode
-        //address signer_address = ecrecover(msg_hash, v, r, s);
-        //require (is_mainNode[signer_address]);
+        address signer_address = recoverSigner(side_chain_block, signature);
+        require (is_mainNode[signer_address]);
 
         //Check whether the new_block_id = block_id + 1. If not, reject the block. 
-        if (block_id + 1 != new_block_id) return false;
+        require (block_id + 1 == new_block_id);
 
         // 2. update hash tentative codes
-        bytes32 new_hash = sha256(abi.encodePacked(curr_hash, sha256(side_chain_block)));
+        bytes32 new_hash = sha256(curr_hash, sha256(side_chain_block));
         curr_hash = new_hash;
         block_id = block_id + 1;
-        return true;
     }
 
-function test(bytes32 msg_hash, uint8 v, bytes32 r, bytes32 s) public returns (address signer_address) {
-    signer_address = ecrecover(msg_hash, v, r, s);
-}
+
 
 
     
