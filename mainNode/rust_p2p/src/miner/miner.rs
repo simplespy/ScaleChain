@@ -1,7 +1,7 @@
 extern crate rand;
 use super::block::{Block, Transaction};
 use super::hash::{H256};
-use super::message::ApiMessage as ServerApiMessage;
+use super::message::ServerApi;
 use std::{thread, time};
 use mio_extras::channel::{self};
 use std::sync::mpsc::{self, TryRecvError};
@@ -11,7 +11,7 @@ use rand::Rng;
 pub struct Manager {
     control_receiver: mpsc::Receiver<ManagerMessage>,
     control_sender: mpsc::Sender<ManagerMessage>,
-    server_api_sender: channel::Sender<ServerApiMessage>, 
+    server_api_sender: channel::Sender<ServerApi>, 
     num_miner: u8,
 }
 
@@ -36,7 +36,7 @@ pub enum ConnectResult {
 
 impl Manager {
     pub fn new(
-        server_api_sender: channel::Sender<ServerApiMessage>
+        server_api_sender: channel::Sender<ServerApi>
     ) -> (Manager, mpsc::Sender<ManagerMessage>) {
         let (control_sender, control_receiver) = mpsc::channel(); 
         let miner_manager = Manager {
@@ -76,7 +76,7 @@ impl Manager {
                         },
                         ManagerMessage::Success(block) => {
                             // construct block and send result to somewhere
-                            self.server_api_sender.send( ServerApiMessage::MinedBlock(block)).unwrap();
+                            self.server_api_sender.send( ServerApi::MinedBlock(block)).unwrap();
                         },
                         ManagerMessage::Fail => {
                             println!("mining fails"); 

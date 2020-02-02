@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, Sender, Receiver, channel};
 use super::message::{Message};
 use mio_extras::channel::{self};
 use std::collections::{VecDeque};
-use super::message::{ApiMessage, ConnectResult, ConnectHandle, PeerHandle};
+use super::message::{ConnectResult, ConnectHandle, PeerHandle};
 use log::{warn, info};
 use super::MSG_BUF_SIZE;
 

@@ -6,7 +6,7 @@ use std::{thread, time};
 use std::io::{self, Read, Write};
 use super::peer::{PeerContext, PeerDirection};
 use super::MSG_BUF_SIZE;
-use super::message::{Message, ApiMessage, ConnectResult, ConnectHandle, TaskRequest};
+use super::message::{Message, ServerApi, ConnectResult, ConnectHandle, TaskRequest};
 use std::sync::mpsc::{self, TryRecvError};
 use mio_extras::channel::{self, Receiver};
 use log::{info};
@@ -26,17 +26,16 @@ pub struct Context {
     token_counter: usize,
     task_sender: mpsc::Sender<TaskRequest>,
     response_receiver: HashMap<Token, channel::Receiver<Message>>,
-    api_receiver: channel::Receiver<ApiMessage>,
+    api_receiver: channel::Receiver<ServerApi>,
     local_addr: SocketAddr,
 }
 
 impl Context {
     pub fn new(
         task_sender: mpsc::Sender<TaskRequest>, 
-        api_receiver: channel::Receiver<ApiMessage>,
-        addr: &str 
+        api_receiver: channel::Receiver<ServerApi>,
+        addr: SocketAddr, 
     ) -> Context {
-        let addr: SocketAddr = addr.parse().unwrap();
         Context{
             poll: Poll::new().unwrap(),
             peers: HashMap::new(),
@@ -154,10 +153,10 @@ impl Context {
                             match api_msg { 
                                 Ok(msg) => {
                                     match msg {
-                                        ApiMessage::ServerConnect(connect_handle) => {
+                                        ServerApi::ServerConnect(connect_handle) => {
                                             self.connect(connect_handle);
                                         },
-                                        ApiMessage::ServerBroadcast(network_message) => {
+                                        ServerApi::ServerBroadcast(network_message) => {
                                             for (token, peer) in self.peers.iter() {
                                                 match peer.direction {
                                                     PeerDirection::Incoming => (),
@@ -167,7 +166,7 @@ impl Context {
                                                 }
                                             }
                                         },
-                                        _ => println!("ApiMessage not implemented yet"),
+                                        _ => println!("ServerApi not implemented yet"),
                                     }
                                     break;
                                 },

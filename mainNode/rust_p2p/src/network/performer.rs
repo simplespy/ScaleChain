@@ -45,9 +45,7 @@ impl Performer {
             match task.msg {
                 Message::Ping(info_msg) => {
                     println!("receive Ping {}", info_msg);
-                    // send Pong message
                     let response_msg = Message::Pong("pong".to_string());
-                    assert!(task.peer.is_some());
                     task.peer.unwrap().response_sender.send(response_msg);
                 }, 
                 Message::Pong(info_msg) => {
@@ -60,15 +58,19 @@ impl Performer {
                     };
                     // TODO check, curr_hash and block are coherent
                     // 1. compute curr_hash locally using all prev blocks stored in block_db
+                    let mut chain = self.chain.lock().unwrap();
+                    let latest_state = chain.get_latest_state();
+
+
                     // 2. if some blocks are not present, use get_block function to retrieve from
                     //    eth archive node, need some search
 
-
                     let mut block_db = self.block_db.lock().unwrap();
                     block_db.insert(&main_node_block.block);
-                    let mut chain = self.chain.lock().unwrap();
+
                     chain.insert(&contract_state);
                     println!("contract state {:?}", contract_state);
+                    drop(chain);
                 },
             }
         } 

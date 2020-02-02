@@ -32,6 +32,14 @@ impl H256 {
         h256.random();
         h256
     }
+
+    pub fn zero() -> H256 {
+        let mut h256 = H256::default();
+        for i in 0..32 {
+            h256.0[i] = 0;
+        }
+        h256
+    }
 }
 
 impl Default for H256 {

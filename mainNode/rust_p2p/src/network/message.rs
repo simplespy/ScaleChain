@@ -17,7 +17,7 @@ pub struct ConnectHandle {
 }
 
 #[derive(Debug, Clone)]
-pub enum ApiMessage {
+pub enum ServerApi {
     ServerConnect(ConnectHandle),
     ServerDisconnect, 
     ServerStop,
