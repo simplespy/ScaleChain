@@ -6,7 +6,7 @@ use std::{thread, time};
 use std::io::{self, Read, Write};
 use super::peer::{PeerContext, PeerDirection};
 use super::MSG_BUF_SIZE;
-use super::message::{Message, ServerApi, ConnectResult, ConnectHandle, TaskRequest};
+use super::message::{Message, ServerSignal, ConnectResult, ConnectHandle, TaskRequest};
 use std::sync::mpsc::{self, TryRecvError};
 use mio_extras::channel::{self, Receiver};
 use log::{info};
@@ -26,25 +26,26 @@ pub struct Context {
     token_counter: usize,
     task_sender: mpsc::Sender<TaskRequest>,
     response_receiver: HashMap<Token, channel::Receiver<Message>>,
-    api_receiver: channel::Receiver<ServerApi>,
+    api_receiver: channel::Receiver<ServerSignal>,
     local_addr: SocketAddr,
 }
 
 impl Context {
     pub fn new(
         task_sender: mpsc::Sender<TaskRequest>, 
-        api_receiver: channel::Receiver<ServerApi>,
         addr: SocketAddr, 
-    ) -> Context {
-        Context{
+    ) -> (Context, channel::Sender<ServerSignal>) {
+        let (control_tx, control_rx) = channel::channel();
+        let context = Context{
             poll: Poll::new().unwrap(),
             peers: HashMap::new(),
             token_counter: 2, // 0, 1 token are reserved
             task_sender: task_sender,
             response_receiver: HashMap::new(),
-            api_receiver: api_receiver,
+            api_receiver: control_rx,
             local_addr: addr,
-        }
+        };
+        (context, control_tx)
     }
     
     // start a server, spawn a process
@@ -153,10 +154,10 @@ impl Context {
                             match api_msg { 
                                 Ok(msg) => {
                                     match msg {
-                                        ServerApi::ServerConnect(connect_handle) => {
+                                        ServerSignal::ServerConnect(connect_handle) => {
                                             self.connect(connect_handle);
                                         },
-                                        ServerApi::ServerBroadcast(network_message) => {
+                                        ServerSignal::ServerBroadcast(network_message) => {
                                             for (token, peer) in self.peers.iter() {
                                                 match peer.direction {
                                                     PeerDirection::Incoming => (),
@@ -166,7 +167,7 @@ impl Context {
                                                 }
                                             }
                                         },
-                                        _ => println!("ServerApi not implemented yet"),
+                                        _ => println!("ServerSignal not implemented yet"),
                                     }
                                     break;
                                 },

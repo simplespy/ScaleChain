@@ -3,7 +3,7 @@ use super::hash::{H256};
 use super::fork::{ForkBuffer};
 use super::block::{Header};
 use std::collections::{HashMap};
-use super::contract::{ContractState};
+use super::contract::contract::{ContractState};
 
 pub struct BlockChain {
     blockchain: Vec<ContractState>,

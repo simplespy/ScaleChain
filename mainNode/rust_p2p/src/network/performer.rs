@@ -5,29 +5,35 @@ use mio_extras::channel::{self};
 use std::thread;
 use super::blockDb::{BlockDb};
 use super::blockchain::blockchain::{BlockChain};
-use super::contract::{Contract, ContractState};
+use super::mempool::mempool::{Mempool};
+use super::contract::contract::{Contract, ContractState};
+use super::contract::interface::Message as ContractMessage;
+use super::contract::interface::Handle;
 use std::sync::{Arc, Mutex};
+use crossbeam::channel::{Sender};
 
 pub struct Performer {
     task_source: mpsc::Receiver<TaskRequest>,
-    contract: Arc<Mutex<Contract>>,
-    chain: Arc<Mutex<BlockChain>>, // may not use chain at all
+    contract_channel: Sender<Handle>,
+    chain: Arc<Mutex<BlockChain>>, 
     block_db: Arc<Mutex<BlockDb>>,
+    mempool: Arc<Mutex<Mempool>>,
 }
 
 impl Performer {
     pub fn new(
         task_source: mpsc::Receiver<TaskRequest>, 
-        contract: Arc<Mutex<Contract>>,
+        contract_channel: Sender<Handle>,
         blockchain: Arc<Mutex<BlockChain>>,
         block_db: Arc<Mutex<BlockDb>>,
-         
+        mempool: Arc<Mutex<Mempool>>,
     ) -> Performer {
         Performer {
             task_source,
-            contract: contract,
+            contract_channel,
             chain: blockchain,
             block_db: block_db,
+            mempool: mempool,
         } 
     }
 
@@ -71,6 +77,10 @@ impl Performer {
                     chain.insert(&contract_state);
                     println!("contract state {:?}", contract_state);
                     drop(chain);
+                },
+                Message::SendTransaction(transaction) => {
+                    let mut mempool = self.mempool.lock().expect("perform locl mempool");
+                    mempool.insert(transaction);
                 },
             }
         } 

@@ -8,6 +8,8 @@ mod primitive;
 mod db;
 mod blockchain;
 mod contract;
+mod experiment;
+mod mempool;
 
 use std::{thread, time};
 use std::sync::mpsc::{self};
@@ -15,18 +17,20 @@ use mio_extras::channel::{self};
 use clap::{Arg, App, SubCommand};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use network::message::{ServerApi, ConnectResult, ConnectHandle};
+use network::message::{ServerSignal, ConnectResult, ConnectHandle};
 use network::message::{Message};
 use network::performer::{Performer};
 use db::blockDb::{BlockDb};
 use blockchain::blockchain::{BlockChain};
-use contract::{Contract, Account};
+use mempool::mempool::{Mempool};
+use contract::contract::{Contract, Account};
 use std::sync::{Arc, Mutex};
 use api::apiServer::ApiServer;
-use api::transactionGenerator::{TransactionGenerator};
+use experiment::transactionGenerator::{TransactionGenerator};
 use primitive::block::{Transaction};
 use rand::Rng;
 use std::net::{SocketAddr};
+use crossbeam::channel as cbchannel;
 
 fn main() {
     let matches = clap_app!(myapp =>
@@ -56,28 +60,34 @@ fn main() {
     // get main data structures 
     let block_db = Arc::new(Mutex::new(BlockDb::new()));
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
-    let contract = Arc::new(Mutex::new(Contract::new(account)));
+
+    let (contract, contract_handle_sender) = Contract::new(account);
+
+    let mempool = Arc::new(Mutex::new(Mempool::new(contract_handle_sender.clone())));
+    contract.start();
 
     let (task_sender, task_receiver) = mpsc::channel();
-    let (server_api_sender, server_api_receiver) = channel::channel();
 
     // create main actors
     let mut performer = Performer::new(
         task_receiver, 
-        contract.clone(),
+        contract_handle_sender.clone(),
         blockchain.clone(), 
-        block_db.clone()
+        block_db.clone(),
+        mempool.clone(),
     );
     performer.start();
 
-    let mut server = network::server::Context::new(
+    let (server, server_control_sender) = network::server::Context::new(
         task_sender.clone(), 
-        server_api_receiver, 
         listen_socket
-        );
+    );
     server.start();
 
-    ApiServer::start(api_socket);
+    let (tx_gen, tx_control_sender) = TransactionGenerator::new(mempool.clone());
+    tx_gen.start();
+
+    ApiServer::start(api_socket, tx_control_sender, mempool.clone(), contract_handle_sender.clone());
 
     // connect to peer
     let f = File::open(neighbor_path).expect("Unable to open file");
@@ -99,8 +109,8 @@ fn main() {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            println!("{} send ServerApi::ServerConnect to {:?}. attempt {}", listen_socket, neighbor, attempt);
-            server_api_sender.send(ServerApi::ServerConnect(connect_handle.clone()));           
+            println!("{} send ServeSignal::ServerConnect to {:?}. attempt {}", listen_socket, neighbor, attempt);
+            server_control_sender.send(ServerSignal::ServerConnect(connect_handle.clone()));           
             match receiver.recv() {
                 Ok(result) => {
                     match result {
@@ -121,15 +131,15 @@ fn main() {
     }
    
 
-    //let mut tx_gen = TransactionGenerator::new();
+
     let mut text_i = 0;
     loop {
         if true {
             text_i += 1;
             let text = String::from("hello") + &(text_i).to_string(); 
             let performer_message = Message::Ping(text);
-            let control_message = ServerApi::ServerBroadcast(performer_message);
-            server_api_sender.send(control_message).expect("broadcast to peer");
+            let control_message = ServerSignal::ServerBroadcast(performer_message);
+            server_control_sender.send(control_message).expect("broadcast to peer");
 
             // web 3
             // 1. interact with smartContract
@@ -138,8 +148,8 @@ fn main() {
 
             
             // sleep
-            let num = rand::thread_rng().gen_range(0, 500);
-            let sleep_time = time::Duration::from_millis(num); //num
+            let num = rand::thread_rng().gen_range(0, 5000);
+            let sleep_time = time::Duration::from_millis(5000); //num
             thread::sleep(sleep_time);
         }
     }

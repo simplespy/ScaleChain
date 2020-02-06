@@ -8,6 +8,7 @@ pub enum Message {
     Ping(String),
     Pong(String),
     SyncBlock(MainNodeBlock),
+    SendTransaction(Transaction),
 }
 
 #[derive(Debug, Clone)]
@@ -17,7 +18,7 @@ pub struct ConnectHandle {
 }
 
 #[derive(Debug, Clone)]
-pub enum ServerApi {
+pub enum ServerSignal {
     ServerConnect(ConnectHandle),
     ServerDisconnect, 
     ServerStop,
