@@ -14,7 +14,6 @@ use crossbeam::channel::{Sender};
 
 pub struct Performer {
     task_source: mpsc::Receiver<TaskRequest>,
-    contract_channel: Sender<Handle>,
     chain: Arc<Mutex<BlockChain>>, 
     block_db: Arc<Mutex<BlockDb>>,
     mempool: Arc<Mutex<Mempool>>,
@@ -23,14 +22,12 @@ pub struct Performer {
 impl Performer {
     pub fn new(
         task_source: mpsc::Receiver<TaskRequest>, 
-        contract_channel: Sender<Handle>,
         blockchain: Arc<Mutex<BlockChain>>,
         block_db: Arc<Mutex<BlockDb>>,
         mempool: Arc<Mutex<Mempool>>,
     ) -> Performer {
         Performer {
             task_source,
-            contract_channel,
             chain: blockchain,
             block_db: block_db,
             mempool: mempool,

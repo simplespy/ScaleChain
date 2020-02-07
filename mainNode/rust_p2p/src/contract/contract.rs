@@ -7,6 +7,8 @@ use web3::types::Address;
 use web3::futures::Future;
 
 use std::thread;
+use std::sync::mpsc;
+use super::network::message::TaskRequest;
 use crossbeam::channel::{self, Sender, Receiver};
 use super::interface::{Handle, Message, Response};
 use super::interface::Answer;
@@ -35,6 +37,7 @@ pub struct Contract {
     my_account: Account, 
     contract_state: ContractState,
     contract_handle: Receiver<Handle>,
+    performer_sender: mpsc::Sender<TaskRequest>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -48,7 +51,10 @@ pub struct Account {
 
 impl Contract {
     // TODO https://github.com/tomusdrw/rust-web3/blob/master/examples/contract.rs
-    pub fn new(account: Account) -> (Contract, Sender<Handle>) {
+    pub fn new(
+        account: Account, 
+        performer_sender: mpsc::Sender<TaskRequest>
+    ) -> (Contract, Sender<Handle>) {
         let (eloop, http) = web3::transports::Http::new(&account.rpc_url).unwrap();
         eloop.into_remote();
 
@@ -59,6 +65,7 @@ impl Contract {
 
         let contract = Contract{
             //contract: ,
+            performer_sender: performer_sender,
             my_account: account, 
             contract_state: ContractState::genesis(),
             contract_handle: rx,

@@ -61,22 +61,24 @@ fn main() {
     let block_db = Arc::new(Mutex::new(BlockDb::new()));
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
 
-    let (contract, contract_handle_sender) = Contract::new(account);
+    let (task_sender, task_receiver) = mpsc::channel();
+
+    let (contract, contract_handle_sender) = Contract::new(account, task_sender.clone());
 
     let mempool = Arc::new(Mutex::new(Mempool::new(contract_handle_sender.clone())));
     contract.start();
-
-    let (task_sender, task_receiver) = mpsc::channel();
-
     // create main actors
     let mut performer = Performer::new(
         task_receiver, 
-        contract_handle_sender.clone(),
         blockchain.clone(), 
         block_db.clone(),
         mempool.clone(),
     );
     performer.start();
+
+
+
+    
 
     let (server, server_control_sender) = network::server::Context::new(
         task_sender.clone(), 
