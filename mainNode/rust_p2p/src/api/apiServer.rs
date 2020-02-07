@@ -13,6 +13,7 @@ use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::collections::{HashMap};
 use serde::{Serialize, Deserialize};
+use web3::types::{TransactionReceipt};
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -40,7 +41,7 @@ macro_rules! respond_result {
             message: $message.to_string(),
         };
         let response = Response::from_string(serde_json::to_string_pretty(&api_result).unwrap())
-            .with_header(content_type);;
+            .with_header(content_type);
         $req.respond(response).unwrap();
     }};
 }
@@ -136,9 +137,72 @@ impl ApiServer {
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
+                            let receipt = match answer_rx.recv() {
+                                Ok(answer) => {
+                                    match answer {
+                                        Answer::Success(response) => {
+                                            match response {
+                                                ContractResponse::TxReceipt(receipt) => receipt,
+                                                _ => {
+                                                    panic!("answer to SendBlockManual: invalid response type");
+                                                },
+                                            }
+                                        },
+                                        Answer::Fail(reason) => {
+                                            respond_result!(request, false, format!("contract query fails {}", reason));
+                                            return;
+                                        },
+                                    }
+                                },
+                                Err(e) => {
+                                    respond_result!(request, false, format!("contract channel broken"));
+                                    return;
+                                },
+                            };
+                            respond_result!(request, true, format!("{:?}", receipt));
+                        },
+                        "/contract/get-tx-receipt" => {
+                            let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                            let hash = match pairs.get("hash") {
+                                Some(s) => s,
+                                None => {
+                                    respond_result!(request, false, "missing hash");
+                                    return;
+                                },
+                            };
+                            let a = hex::decode(hash).unwrap();
+                            let tx_hash: &[u8] = a.as_ref();
+                            let tx_hash = web3::types::H256::from_slice(tx_hash);
 
-                            let reply = Response::from_string(format!("Send block {}", block_str));
-                            request.respond(reply);
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: Message::GetTxReceipt(tx_hash),
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+                            let receipt = match answer_rx.recv() {
+                                Ok(answer) => {
+                                    match answer {
+                                        Answer::Success(response) => {
+                                            match response {
+                                                ContractResponse::TxReceipt(receipt) => receipt,
+                                                _ => {
+                                                    panic!("answer to GetMainNodes: invalid response type");
+                                                },
+                                            }
+                                        },
+                                        Answer::Fail(reason) => {
+                                            respond_result!(request, false, format!("contract query fails {}", reason));
+                                            return;
+                                        },
+                                    }
+                                },
+                                Err(e) => {
+                                    respond_result!(request, false, format!("contract channel broken"));
+                                    return;
+                                },
+                            };
+                            respond_result!(request, true, format!("{:?}", receipt));
                         },
                         "/contract/count-main-nodes" => {
                             // USE CALLBACK
@@ -201,7 +265,7 @@ impl ApiServer {
                                     return;
                                 },
                             };
-                            respond_result!(request, false, format!("{:?}", curr_state));
+                            respond_result!(request, true, format!("{:?}", curr_state));
                         },
                         "/contract/get-main-nodes" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
@@ -232,7 +296,7 @@ impl ApiServer {
                                     return;
                                 },
                             };
-                            respond_result!(request, false, format!("{:?}", main_nodes));
+                            respond_result!(request, true, format!("{:?}", main_nodes));
                         },
                         "/contract/add-main-node" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();

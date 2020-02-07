@@ -4,9 +4,11 @@ use super::block::{Block, Transaction, Header};
 use super::blockchain::{BlockChain};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self};
-use crossbeam::channel::{Sender};
 use std::collections::{HashSet};
-use super::contract::interface::{Handle, Message};
+use super::contract::interface::{Message, Handle, Answer};
+use web3::types::{TransactionReceipt};
+use super::contract::interface::Response as ContractResponse;
+use crossbeam::channel::{self, Sender};
 
 pub struct Mempool {
     block: Block,
@@ -57,13 +59,43 @@ impl Mempool {
 
         // send block to ethereum network
         let message = Message::SendBlock(self.block.ser());
+        let (answer_tx, answer_rx) = channel::bounded(1);
         let handle = Handle {
             message: message,
-            answer_channel: None,
+            answer_channel: Some(answer_tx),
         };
         self.contract_handler.send(handle);
-        //TODO remove sent transactions
-        self.block.clear();
+        let receipt = match answer_rx.recv() {
+            Ok(answer) => {
+                match answer {
+                    Answer::Success(response) => {
+                        match response {
+                            ContractResponse::TxReceipt(receipt) => receipt,
+                            _ => {
+                                panic!("answer to SendBlock: invalid response type");
+                            },
+                        }
+                    },
+                    Answer::Fail(reason) => {
+                        println!("contract query fails {:?}", reason);
+                        return;
+                    },
+                }
+            },
+            Err(e) => {
+                println!("contract channel broken");
+                return;
+            },
+        };
+        // send Block success
+        if (!receipt.status.unwrap().is_zero()) {
+            println!("Receipt: {:#?}", receipt);
+            self.block.clear();
+            //TODO: broadcast block
+        }
+        else {
+            println!("sendBlock Failed");
+        }
     }
 
     pub fn insert(&mut self, transaction: Transaction) {

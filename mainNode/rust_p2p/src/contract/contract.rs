@@ -89,9 +89,9 @@ impl Contract {
                     //let _ = std::thread::spawn(move || {
                         Ok(handle) => {
                             match handle.message {
-                                Message::SendBlock(block) => {
+                                Message::SendBlock(_) => {
                                     println!("send block");
-                                    self.send_block(block.as_ref());
+                                    self.send_block(handle);
                                 },
                                 Message::AddMainNode(address) => {
                                     println!("add man node");
@@ -106,7 +106,13 @@ impl Contract {
                                 Message::GetMainNodes => {
                                     self.get_main_nodes(handle);
                                 }
+                                Message::GetTxReceipt(tx_hash) => {
+                                    self.get_tx_receipt(handle, tx_hash);
+                                }
                                 //...
+                                _ => {
+                                    println!("Unrecognized Message");
+                                }
                             };
                         },
                         Err(e) => {
@@ -294,8 +300,16 @@ impl Contract {
         return ethereum_types::H256(self.to_array(private_key.as_slice()));
     }
 
-    pub fn send_block(&self, block: &[u8])  {
-        let str_block = hex::encode(block);
+    pub fn send_block(&self, handle: Handle)  {
+        let mut block_vec: Vec<u8> = Vec::new();
+        match handle.clone().message {
+            Message::SendBlock(block) => {
+                block_vec = block.clone();
+            },
+            _ => {}
+        }
+        let block: &[u8] = block_vec.as_ref();
+        let str_block= hex::encode(block);
         const ETH_CHAIN_ID: u32 = 3;
         let nonce = self.web3.eth()
             .transaction_count(self.my_account.address, None)
@@ -332,24 +346,27 @@ impl Contract {
             .wait()
             .unwrap();
         println!("tx_hash = {:?}", tx_hash);
-
-     //   self.get_tx_receipt(tx_hash);
-
-     //   let a = hex::decode("30613e539b2324d2d67670bdd77f1a3099c08c1f44f71230bed52647d520e2e3").unwrap();
-     //   let tx_hash: &[u8] = a.as_ref();
-     //   let tx_hash = web3::types::H256::from_slice(tx_hash);
-     //   self.get_tx_receipt(tx_hash);
-
-
+        self.get_tx_receipt(handle, tx_hash);
     }
 
-    pub fn get_tx_receipt(&self, tx_hash: web3::types::H256) {
-        let receipt: TransactionReceipt = self.web3.eth()
+    pub fn get_tx_receipt(&self, handle: Handle, tx_hash: web3::types::H256) {
+        let mut receipt = self.web3.eth()
             .transaction_receipt(tx_hash)
             .wait()
-            .unwrap()
-            .expect("get receipt");
-        println!("receipt = {:#?}", receipt);
+            .unwrap();
+        while (receipt.is_none()) {
+            receipt = self.web3.eth()
+                .transaction_receipt(tx_hash)
+                .wait()
+                .unwrap();
+        }
+    //    println!("receipt = {:#?}", receipt.unwrap());
+        let response = Response::TxReceipt(receipt.unwrap());
+        let answer = Answer::Success(response);
+        match handle.answer_channel.as_ref() {
+            Some(ch) => (*ch).send(answer).unwrap(),
+            None => panic!("contract get receipt without answer channel"),
+        }
     }
 
     // pull function to get updated, return number of state change, 0 for no change 
