@@ -9,6 +9,7 @@ use web3::futures::Future;
 use std::thread;
 use crossbeam::channel::{self, Sender, Receiver};
 use super::interface::{Handle, Message, Response};
+use super::interface::Answer;
 
 use std::io::{Result};
 use serde::{Serialize, Deserialize};
@@ -70,27 +71,47 @@ impl Contract {
         let _ = std::thread::spawn(move || {
             loop {
                 match self.contract_handle.recv() {
-                    Ok(handle) => {
-                        match handle.message {
-                            Message::SendBlock => {
-                                println!("send block");
-                                //self.send_block(); 
-                            },
-                            Message::AddMainNode => {
-                                println!("add man node");
-                                //self.add_main_node();
-                            },
-                            Message::CountMainNodes => {
-                                self.count_main_nodes(handle);
-                            },
-                        };
-                    },
-                    Err(e) => {
-                        panic!("contract query channel");
-                    }, 
+                    //let _ = std::thread::spawn(move || {
+                        Ok(handle) => {
+                            match handle.message {
+                                Message::SendBlock => {
+                                    println!("send block");
+                                    //self.send_block(); 
+                                },
+                                Message::AddMainNode => {
+                                    println!("add man node");
+                                    //self.add_main_node();
+                                },
+                                Message::CountMainNodes => {
+                                    self.count_main_nodes(handle);
+                                },
+                                Message::GetCurrState => {
+                                    self.get_curr_state(handle); 
+                                },
+                                //...
+                            };
+                        },
+                        Err(e) => {
+                            panic!("contract query channel");
+                        }, 
+                    //});
                 }
             }
         });
+    }
+
+    // TODO
+    fn get_curr_state(&self, handle: Handle) {
+        // ethereum rust to get contract state
+        let curr_state = ContractState {
+            curr_hash: H256::default(),
+            block_id: 0,   
+        };
+
+        let response = Response::GetCurrState(curr_state);
+        let answer = Answer::Success(response);
+        handle.answer_channel.unwrap().send(answer);
+         
     }
 
     pub fn sync(&self) -> ContractState {
@@ -106,18 +127,18 @@ impl Contract {
         unimplemented!()
     }
 
-    pub fn count_main_nodes(&self, handle: Handle) -> Result<usize> {
+    pub fn count_main_nodes(&self, handle: Handle){
         println!("count_main_nodes");
-        let response = Response::Success(0);
-        handle.answer_channel.unwrap().send(response);
-        Ok(0)
+        let num_main_node = 0;
+        let response = Response::CountMainNode(num_main_node);
+        let answer = Answer::Success(response);
+        match handle.answer_channel.as_ref() {
+            Some(ch) => (*ch).send(answer).unwrap(),
+            None => panic!("contract count main node without answer channel"),
+        }
     }
 
     pub fn add_main_node(&self) -> Result<()> {
-        unimplemented!()
-    }
-
-    pub fn get_curr_state(&self) -> Result<ContractState> {
         unimplemented!()
     }
 

@@ -1,0 +1,3 @@
+curl 'localhost:41000/contract/count-main-nodes'
+curl 'localhost:41000/transaction-generator/step?step=9'
+curl 'localhost:41000/mempool/num-transaction'
