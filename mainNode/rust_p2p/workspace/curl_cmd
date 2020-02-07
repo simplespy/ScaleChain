@@ -1,3 +1,7 @@
 curl 'localhost:41000/contract/count-main-nodes'
 curl 'localhost:41000/transaction-generator/step?step=9'
 curl 'localhost:41000/mempool/num-transaction'
+curl 'localhost:41000/contract/send-block-manual?block=hello'
+curl 'localhost:41000/contract/count-main-nodes'
+curl 'localhost:41000/contract/get-main-nodes'
+curl 'localhost:41000/contract/get-curr-state'
