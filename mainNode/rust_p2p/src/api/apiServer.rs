@@ -119,8 +119,26 @@ impl ApiServer {
                             drop(mempool);
                             respond_result!(request, true, &num.to_string());
                         },
-                        "/mempool/send-block" => {
-                            unimplemented!()
+                        "/contract/send-block-manual" => {
+                            let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                            let block = match pairs.get("block") {
+                                Some(s) => s,
+                                None => {
+                                    respond_result!(request, false, "missing block");
+                                    return;
+                                },
+                            };
+                            let block_str = String::from(block);
+                            let block = block_str.clone().into_bytes();
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: Message::SendBlock(block),
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+
+                            let reply = Response::from_string(format!("Send block {}", block_str));
+                            request.respond(reply);
                         },
                         "/contract/count-main-nodes" => {
                             // USE CALLBACK
@@ -157,7 +175,7 @@ impl ApiServer {
                         "/contract/get-curr-state" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::CountMainNodes,
+                                message: Message::GetCurrState,
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
@@ -168,7 +186,7 @@ impl ApiServer {
                                             match response {
                                                 ContractResponse::GetCurrState(curr_state) => curr_state,
                                                 _ => {
-                                                    panic!("answer to NumMainNode: invalid response type");
+                                                    panic!("answer to GetCurrState: invalid response type");
                                                 },
                                             }
                                         },
@@ -184,7 +202,57 @@ impl ApiServer {
                                 },
                             };
                             respond_result!(request, false, format!("{:?}", curr_state));
-                        }
+                        },
+                        "/contract/get-main-nodes" => {
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: Message::GetMainNodes,
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+                            let main_nodes = match answer_rx.recv() {
+                                Ok(answer) => {
+                                    match answer {
+                                        Answer::Success(response) => {
+                                            match response {
+                                                ContractResponse::MainNodesList(main_nodes) => main_nodes,
+                                                _ => {
+                                                    panic!("answer to GetMainNodes: invalid response type");
+                                                },
+                                            }
+                                        },
+                                        Answer::Fail(reason) => {
+                                            respond_result!(request, false, format!("contract query fails {}", reason));
+                                            return;
+                                        },
+                                    }
+                                },
+                                Err(e) => {
+                                    respond_result!(request, false, format!("contract channel broken"));
+                                    return;
+                                },
+                            };
+                            respond_result!(request, false, format!("{:?}", main_nodes));
+                        },
+                        "/contract/add-main-node" => {
+                            let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                            let address = match pairs.get("address") {
+                                Some(s) => s,
+                                None => {
+                                    respond_result!(request, false, "missing address");
+                                    return;
+                                },
+                            };
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let address = address.parse().unwrap();
+                            let handle = Handle {
+                                message: Message::AddMainNode(address),
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+                            let reply = Response::from_string(format!("Add mainNode {}", address));
+                            request.respond(reply);
+                        },
                         _ => {
                             println!("all other option");
                         }

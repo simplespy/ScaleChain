@@ -56,12 +56,14 @@ impl Mempool {
         self.block.update_hash();
 
         // send block to ethereum network
-        let message = Message::CountMainNodes;
+        let message = Message::SendBlock(self.block.ser());
         let handle = Handle {
             message: message,
             answer_channel: None,
         };
         self.contract_handler.send(handle);
+        //TODO remove sent transactions
+        self.block.clear();
     }
 
     pub fn insert(&mut self, transaction: Transaction) {

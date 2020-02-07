@@ -72,6 +72,10 @@ impl From<H256> for Vec<u8> {
     }
 }
 
-
+impl From<web3::types::H256> for H256 {
+    fn from(h: web3::types::H256) -> Self {
+        H256 ( *h.as_fixed_bytes() )
+    }
+}
 
 

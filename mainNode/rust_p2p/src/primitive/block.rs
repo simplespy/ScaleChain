@@ -51,6 +51,10 @@ impl Block {
     pub fn update_prev_blockhash(&mut self, hash: H256) {
         self.header.prev_hash = hash;
     }
+
+    pub fn ser(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
 }
 
 

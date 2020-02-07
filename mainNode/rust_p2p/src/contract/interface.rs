@@ -11,6 +11,7 @@ pub enum Response {
     GetCurrState(ContractState),
     CountMainNode(usize), 
     AddMainNode,
+    MainNodesList(Vec<web3::types::Address>),
 }
 
 pub enum Answer {
@@ -19,8 +20,9 @@ pub enum Answer {
 }
 
 pub enum Message {
-    SendBlock,
+    SendBlock(Vec<u8>),
     GetCurrState,
     CountMainNodes,
-    AddMainNode, 
+    AddMainNode(web3::types::Address),
+    GetMainNodes,
 }
