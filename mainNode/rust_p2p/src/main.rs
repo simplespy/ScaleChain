@@ -62,10 +62,23 @@ fn main() {
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
 
     let (task_sender, task_receiver) = mpsc::channel();
+    let (server, server_control_sender) = network::server::Context::new(
+        task_sender.clone(), 
+        listen_socket
+    );
+    server.start();
 
-    let (contract, contract_handle_sender) = Contract::new(account, task_sender.clone());
-
+    let (contract_handle_sender, contract_handle_receiver) = cbchannel::unbounded();
     let mempool = Arc::new(Mutex::new(Mempool::new(contract_handle_sender.clone())));
+    let contract = Contract::new(
+        account, 
+        task_sender.clone(),
+        server_control_sender.clone(),
+        contract_handle_receiver,
+        mempool.clone(),
+    ); 
+
+
     contract.start();
     // create main actors
     let mut performer = Performer::new(
@@ -80,11 +93,7 @@ fn main() {
 
     
 
-    let (server, server_control_sender) = network::server::Context::new(
-        task_sender.clone(), 
-        listen_socket
-    );
-    server.start();
+
 
     let (tx_gen, tx_control_sender) = TransactionGenerator::new(mempool.clone());
     tx_gen.start();

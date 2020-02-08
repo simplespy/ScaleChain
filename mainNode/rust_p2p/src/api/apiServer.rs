@@ -120,46 +120,11 @@ impl ApiServer {
                             drop(mempool);
                             respond_result!(request, true, &num.to_string());
                         },
-                        "/contract/send-block-manual" => {
-                            let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
-                            let block = match pairs.get("block") {
-                                Some(s) => s,
-                                None => {
-                                    respond_result!(request, false, "missing block");
-                                    return;
-                                },
-                            };
-                            let block_str = String::from(block);
-                            let block = block_str.clone().into_bytes();
-                            let (answer_tx, answer_rx) = channel::bounded(1);
-                            let handle = Handle {
-                                message: Message::SendBlock(block),
-                                answer_channel: Some(answer_tx),
-                            };
-                            rc.contract_channel.send(handle);
-                            let receipt = match answer_rx.recv() {
-                                Ok(answer) => {
-                                    match answer {
-                                        Answer::Success(response) => {
-                                            match response {
-                                                ContractResponse::TxReceipt(receipt) => receipt,
-                                                _ => {
-                                                    panic!("answer to SendBlockManual: invalid response type");
-                                                },
-                                            }
-                                        },
-                                        Answer::Fail(reason) => {
-                                            respond_result!(request, false, format!("contract query fails {}", reason));
-                                            return;
-                                        },
-                                    }
-                                },
-                                Err(e) => {
-                                    respond_result!(request, false, format!("contract channel broken"));
-                                    return;
-                                },
-                            };
-                            respond_result!(request, true, format!("{:?}", receipt));
+                        "/contract/send-block" => {
+                            let mut mempool = rc.mempool.lock().expect("api send block");
+                            mempool.send_block();
+                            drop(mempool);
+                            respond_result!(request, true, "ok");
                         },
                         "/contract/get-tx-receipt" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();

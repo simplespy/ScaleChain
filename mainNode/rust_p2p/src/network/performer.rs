@@ -6,9 +6,10 @@ use std::thread;
 use super::blockDb::{BlockDb};
 use super::blockchain::blockchain::{BlockChain};
 use super::mempool::mempool::{Mempool};
-use super::contract::contract::{Contract, ContractState};
+use super::contract::contract::{Contract};
 use super::contract::interface::Message as ContractMessage;
 use super::contract::interface::Handle;
+use super::primitive::block::ContractState;
 use std::sync::{Arc, Mutex};
 use crossbeam::channel::{Sender};
 
@@ -55,10 +56,8 @@ impl Performer {
                     println!("receive Pong {}", info_msg);                  
                 },
                 Message::SyncBlock(main_node_block) => {
-                    let contract_state = ContractState {
-                        curr_hash: main_node_block.curr_hash,
-                        block_id: main_node_block.block_id,
-                    };
+                    let contract_state = main_node_block.contract_state;
+
                     // TODO check, curr_hash and block are coherent
                     // 1. compute curr_hash locally using all prev blocks stored in block_db
                     let mut chain = self.chain.lock().unwrap();

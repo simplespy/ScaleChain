@@ -1,4 +1,4 @@
-use super::primitive::{hash, block};
+use super::primitive::{self, hash, block};
 use super::contract;
 
 

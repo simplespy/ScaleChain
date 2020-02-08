@@ -1,5 +1,5 @@
 use crossbeam::channel::{Sender};
-use super::contract::{ContractState};
+use super::primitive::block::{ContractState, Block};
 use web3::types::{Address, H256, TransactionReceipt};
 
 #[derive(Clone)]
@@ -23,7 +23,7 @@ pub enum Answer {
 }
 #[derive(Clone)]
 pub enum Message {
-    SendBlock(Vec<u8>),
+    SendBlock(Block),
     GetCurrState,
     CountMainNodes,
     AddMainNode(Address),

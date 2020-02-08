@@ -1,13 +1,19 @@
+use super::primitive::block::{MainNodeBlock, ContractState, Block};
 use super::primitive::hash::{H256};
-use super::primitive::block::{MainNodeBlock};
+use super::network::message::{ServerSignal};
+use super::network::message::Message as ServerMessage;
+use super::mempool::mempool::{Mempool};
 
 use web3::contract::Contract as EthContract;
 use web3::contract::Options as EthOption;
 use web3::types::{Address, Bytes, TransactionReceipt};
 use web3::futures::Future;
+use mio_extras::channel::Sender as MioSender;
+
 
 use std::thread;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use super::network::message::TaskRequest;
 use crossbeam::channel::{self, Sender, Receiver};
 use super::interface::{Handle, Message, Response};
@@ -23,20 +29,7 @@ use crypto::digest::Digest;
 use secp256k1::{Secp256k1, SecretKey};
 
 
-#[derive(Debug, Default, Copy, Clone)]
-pub struct ContractState {
-    pub curr_hash: H256,
-    pub block_id: usize,
-}
 
-impl ContractState {
-    pub fn genesis () -> ContractState {
-        ContractState {
-            curr_hash: H256::zero(),
-            block_id: 0,
-        }
-    }
-}
 
 
 pub struct Contract {
@@ -44,7 +37,9 @@ pub struct Contract {
     my_account: Account, 
     contract_state: ContractState,
     contract_handle: Receiver<Handle>,
+    mempool: Arc<Mutex<Mempool>>,
     performer_sender: mpsc::Sender<TaskRequest>,
+    server_control_sender: MioSender<ServerSignal>,
     web3: web3::api::Web3<web3::transports::Http>
 }
 
@@ -59,8 +54,11 @@ pub struct Account {
 impl Contract {
     pub fn new(
         account: Account, 
-        performer_sender: mpsc::Sender<TaskRequest>
-    ) -> (Contract, Sender<Handle>) {
+        performer_sender: mpsc::Sender<TaskRequest>,
+        server_control_sender: MioSender<ServerSignal>,
+        contract_handle: Receiver<Handle>, 
+        mempool: Arc<Mutex<Mempool>>,
+    ) -> Contract {
         let (eloop, http) = web3::transports::Http::new(&account.rpc_url).unwrap();
         eloop.into_remote();
 
@@ -68,18 +66,18 @@ impl Contract {
         //let contract = EthContract::new(web3.eth(), account.contract_address, );
         let contract = EthContract::from_json(web3.eth(), account.contract_address, include_bytes!("./abi.json")).unwrap();
 
-        let (tx, rx) = channel::unbounded();
-
         let contract = Contract{
             contract: contract,
             performer_sender: performer_sender,
+            server_control_sender: server_control_sender, 
             my_account: account, 
             contract_state: ContractState::genesis(),
-            contract_handle: rx,
-            web3: web3
+            contract_handle: contract_handle,
+            web3: web3,
+            mempool: mempool,
         };
 
-        return (contract, tx);
+        return contract;
     }
 
     pub fn start(mut self) {
@@ -124,7 +122,7 @@ impl Contract {
         });
     }
 
-    fn get_curr_state(&self, handle: Handle) {
+    fn _get_curr_state(&self) -> ContractState {
         let hash: web3::types::H256 = self.contract
             .query("getCurrentHash", (), None, EthOption::default(), None)
             .wait()
@@ -133,15 +131,17 @@ impl Contract {
             .query("getBlockID", (), None, EthOption::default(), None)
             .wait()
             .unwrap();
-        let curr_state = ContractState {
+        ContractState {
             curr_hash: hash.into(),
             block_id: blk_id.as_usize(),
-        };
+        }
+    }
 
+    fn get_curr_state(&self, handle: Handle) {
+        let curr_state = self._get_curr_state();
         let response = Response::GetCurrState(curr_state);
         let answer = Answer::Success(response);
         handle.answer_channel.unwrap().send(answer);
-         
     }
 
     pub fn sync(&self) -> ContractState {
@@ -301,15 +301,13 @@ impl Contract {
     }
 
     pub fn send_block(&self, handle: Handle)  {
-        let mut block_vec: Vec<u8> = Vec::new();
-        match handle.clone().message {
-            Message::SendBlock(block) => {
-                block_vec = block.clone();
-            },
-            _ => {}
-        }
-        let block: &[u8] = block_vec.as_ref();
-        let str_block= hex::encode(block);
+        let block = match handle.clone().message {
+            Message::SendBlock(block) => block,
+            _ => panic!("contract send block not receive block"), 
+        };
+        let block_vec: Vec<u8> = block.clone().ser();
+        let block_ref: &[u8] = block_vec.as_ref();
+        let str_block= hex::encode(block_ref);
         const ETH_CHAIN_ID: u32 = 3;
         let nonce = self.web3.eth()
             .transaction_count(self.my_account.address, None)
@@ -346,10 +344,31 @@ impl Contract {
             .wait()
             .unwrap();
         println!("tx_hash = {:?}", tx_hash);
-        self.get_tx_receipt(handle, tx_hash);
+        if self.get_tx_receipt(handle, tx_hash) {
+            // broadcast to peers
+            let curr_state = self._get_curr_state();
+            self.send_p2p(curr_state, block);
+        } else {
+            // return transaction back to mempool
+            let mut mempool = self.mempool.lock().expect("api change mempool size");
+            mempool.return_block(block);
+            drop(mempool);           
+        }
     }
 
-    pub fn get_tx_receipt(&self, handle: Handle, tx_hash: web3::types::H256) {
+    fn send_p2p(&self, curr_state: ContractState, block: Block) {
+        let main_block = MainNodeBlock {
+            contract_state: curr_state,
+            block: block,
+        };
+
+        let server_message = ServerMessage::SyncBlock(main_block);
+        let p2p_message = ServerSignal::ServerBroadcast(server_message);
+        self.server_control_sender.send(p2p_message); 
+    }
+
+    // TODO needs some timeout to return false
+    pub fn get_tx_receipt(&self, handle: Handle, tx_hash: web3::types::H256) -> bool {
         let mut receipt = self.web3.eth()
             .transaction_receipt(tx_hash)
             .wait()
@@ -360,13 +379,8 @@ impl Contract {
                 .wait()
                 .unwrap();
         }
-    //    println!("receipt = {:#?}", receipt.unwrap());
-        let response = Response::TxReceipt(receipt.unwrap());
-        let answer = Answer::Success(response);
-        match handle.answer_channel.as_ref() {
-            Some(ch) => (*ch).send(answer).unwrap(),
-            None => panic!("contract get receipt without answer channel"),
-        }
+        return true;
+    
     }
 
     // pull function to get updated, return number of state change, 0 for no change 

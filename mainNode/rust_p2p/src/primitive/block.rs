@@ -3,11 +3,27 @@ use super::hash::{H256};
 use super::crypto::{self};
 use super::merkle::{MerkleHash};
 
+#[derive(Serialize, Deserialize, Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct ContractState {
+    pub curr_hash: H256,
+    pub block_id: usize,
+}
+
+impl ContractState {
+    pub fn genesis () -> ContractState {
+        ContractState {
+            curr_hash: H256::zero(),
+            block_id: 0,
+        }
+    }
+}
+
+
+
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Default, PartialEq, Eq)]
 pub struct MainNodeBlock {
-     pub curr_hash: H256,
+     pub contract_state: ContractState,
      pub block: Block,
-     pub block_id: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Default, PartialEq, Eq)]
