@@ -7,13 +7,12 @@ use super::contract::interface::Response as ContractResponse;
 use std::sync::mpsc::{self};
 use crossbeam::channel::{self, Sender};
 use std::thread;
-use tiny_http::{Server, Response, IncomingRequests, Header};
+use tiny_http::{Server, Response, Header};
 use url::Url;
 use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::collections::{HashMap};
-use serde::{Serialize, Deserialize};
-use web3::types::{TransactionReceipt};
+use serde::{Serialize};
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -281,6 +280,14 @@ impl ApiServer {
                             rc.contract_channel.send(handle);
                             let reply = Response::from_string(format!("Add mainNode {}", address));
                             request.respond(reply);
+                        },
+                        "/contract/get-all" => {
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: Message::GetAll,
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
                         },
                         _ => {
                             println!("all other option");

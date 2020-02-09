@@ -29,4 +29,5 @@ pub enum Message {
     AddMainNode(Address),
     GetMainNodes,
     GetTxReceipt(H256),
+    GetAll,
 }

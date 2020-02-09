@@ -1,36 +1,32 @@
 use super::primitive::block::{MainNodeBlock, ContractState, Block};
 use super::primitive::hash::{H256};
-use super::network::message::{ServerSignal};
+use super::network::message::{ServerSignal, TaskRequest};
 use super::network::message::Message as ServerMessage;
 use super::mempool::mempool::{Mempool};
+use super::interface::{Handle, Message, Response, Answer};
 
 use web3::contract::Contract as EthContract;
 use web3::contract::Options as EthOption;
-use web3::types::{Address, Bytes, TransactionReceipt};
+use web3::types::{Address, Bytes};
 use web3::futures::Future;
-use mio_extras::channel::Sender as MioSender;
 
-
-use std::thread;
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
-use super::network::message::TaskRequest;
-use crossbeam::channel::{self, Sender, Receiver};
-use super::interface::{Handle, Message, Response};
-use super::interface::Answer;
-
-use std::io::{Result};
-use std::process::Command;
-use serde::{Serialize, Deserialize};
-
-use ethereum_tx_sign::RawTransaction;
 use crypto::sha3::Sha3;
 use crypto::digest::Digest;
+use crypto::sha2::Sha256;
+
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::{time};
+use std::io::{Result};
+use std::process::Command;
+
+use crossbeam::channel::{Receiver};
+use serde::{Serialize, Deserialize};
+use ethereum_tx_sign::RawTransaction;
+
 use secp256k1::{Secp256k1, SecretKey};
-
-
-
-
+use mio_extras::channel::Sender as MioSender;
+use requests::ToJson;
 
 pub struct Contract {
     contract: EthContract<web3::transports::Http>,
@@ -67,14 +63,14 @@ impl Contract {
         let contract = EthContract::from_json(web3.eth(), account.contract_address, include_bytes!("./abi.json")).unwrap();
 
         let contract = Contract{
-            contract: contract,
-            performer_sender: performer_sender,
-            server_control_sender: server_control_sender, 
+            contract,
+            performer_sender,
+            server_control_sender,
             my_account: account, 
             contract_state: ContractState::genesis(),
-            contract_handle: contract_handle,
-            web3: web3,
-            mempool: mempool,
+            contract_handle,
+            web3,
+            mempool,
         };
 
         return contract;
@@ -103,10 +99,13 @@ impl Contract {
                                 },
                                 Message::GetMainNodes => {
                                     self.get_main_nodes(handle);
-                                }
+                                },
                                 Message::GetTxReceipt(tx_hash) => {
                                     self.get_tx_receipt(handle, tx_hash);
-                                }
+                                },
+                                Message::GetAll => {
+                                    self.test_get_all();
+                                },
                                 //...
                                 _ => {
                                     println!("Unrecognized Message");
@@ -367,17 +366,21 @@ impl Contract {
         self.server_control_sender.send(p2p_message); 
     }
 
-    // TODO needs some timeout to return false
     pub fn get_tx_receipt(&self, handle: Handle, tx_hash: web3::types::H256) -> bool {
+        let now = time::Instant::now();
         let mut receipt = self.web3.eth()
             .transaction_receipt(tx_hash)
             .wait()
             .unwrap();
-        while (receipt.is_none()) {
+        while receipt.is_none() {
             receipt = self.web3.eth()
                 .transaction_receipt(tx_hash)
                 .wait()
                 .unwrap();
+            if now.elapsed().as_secs() > 60 {
+                println!("Transaction TimeOut");
+                return false;
+            }
         }
         return true;
     
@@ -387,4 +390,59 @@ impl Contract {
     pub fn sync_etherchain(&self) -> Result<usize> {
          unimplemented!()   
     }
+
+    pub fn test_get_all(&self) {
+        let res = self.get_all([0u8; 32], 0, 9999999);
+        println!("{:#?}", res);
+
+    }
+
+    pub fn get_all(&self, init_hash: [u8;32], start: usize, end: usize) -> Vec<ContractState> {
+        let mut curr_hash = init_hash;
+        let func_sig = "ae8d0145";
+        let mut block_list: Vec<String> = Vec::new();
+        let mut state_list: Vec<ContractState> = Vec::new();
+        let request_url = format!("https://api-ropsten.etherscan.io/api?module=account&action=txlist&address={address}&startblock={start}&endblock={end}&sort=asc&apikey={apikey}",
+                                  address = "0xE5C10A1E39fA1fAF25E4fD5ce2C4e2ec5A7aB926",
+                                  start = start,
+                                  end = end,
+                                  apikey = "UGEFW13C4HVZ9GGH5GWIRHQHYYPYKX7FCX");
+
+        let response = requests::get(request_url).unwrap();
+        let data = response.json().unwrap();
+        for i in {0..data["result"].len()} {
+            if data["result"][i]["input"].as_str().unwrap().len() < 10 {continue;}
+            let sig = &data["result"][i]["input"].as_str().unwrap()[2..10];
+            let isError = data["result"][i]["isError"].as_str().unwrap().parse::<i32>().unwrap();
+            if sig == func_sig && isError == 0 {
+                let input = &data["result"][i]["input"].as_str().unwrap()[10..];
+                let command = format!("ethabi decode params -t string -t bytes -t uint256 {}", input);
+                let output = Command::new("sh").arg("-c")
+                    .arg(command)
+                    .output().unwrap();
+                let params = std::str::from_utf8(&output.stdout).unwrap().split("\n");
+                let params: Vec<&str> = params.collect();
+                let block = params[0].replace("string ", "");
+                let block_id = params[2].replace("uint256 ", "");
+                let block_id = usize::from_str_radix(&block_id, 16).unwrap();
+
+                block_list.push(block.clone());
+                let mut hasher = Sha256::new();
+                hasher.input_str(&block);
+                let mut block_hash = [0u8;32];
+                hasher.result(&mut block_hash);
+                let concat_str = [curr_hash, block_hash].concat();
+                let mut hasher = Sha256::new();
+                hasher.input(&concat_str);
+                hasher.result(&mut curr_hash);
+                state_list.push(ContractState{
+                    curr_hash: H256(curr_hash),
+                    block_id,
+                })
+            }
+        }
+        return state_list;
+    }
+
+
 }
