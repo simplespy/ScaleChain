@@ -86,6 +86,7 @@ fn main() {
         blockchain.clone(), 
         block_db.clone(),
         mempool.clone(),
+        contract_handle_sender.clone(),
     );
     performer.start();
 
@@ -160,7 +161,7 @@ fn main() {
             
             // sleep
             let num = rand::thread_rng().gen_range(0, 5000);
-            let sleep_time = time::Duration::from_millis(5000); //num
+            let sleep_time = time::Duration::from_millis(1000); //num
             thread::sleep(sleep_time);
         }
     }

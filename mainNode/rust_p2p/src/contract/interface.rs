@@ -15,6 +15,7 @@ pub enum Response {
     AddMainNode,
     MainNodesList(Vec<Address>),
     TxReceipt(TransactionReceipt),
+    GetAll(Vec<ContractState>),
 }
 #[derive(Clone)]
 pub enum Answer {
@@ -29,5 +30,10 @@ pub enum Message {
     AddMainNode(Address),
     GetMainNodes,
     GetTxReceipt(H256),
-    GetAll,
+    GetAll(([u8;32], usize, usize)), //inithash, start, end
+}
+
+pub enum Error {
+    TimeOut,
+    ConnectionFail,
 }

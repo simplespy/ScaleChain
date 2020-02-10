@@ -21,6 +21,15 @@ impl BlockChain {
         self.blockchain.push(contract_state.clone());
     }
 
+    // block_id itself is changed
+    pub fn revise(&mut self, block_id: usize, states: Vec<ContractState>) {
+
+    }
+
+    pub fn replace(&mut self, chain: Vec<ContractState>) {
+        self.blockchain = chain;
+    }
+
     // block id should start at 0, so is consistent with height
     pub fn get_height(&self) -> usize {
         self.blockchain.len() 

@@ -284,7 +284,7 @@ impl ApiServer {
                         "/contract/get-all" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::GetAll,
+                                message: Message::GetAll(([0u8; 32], 0, 9999999)),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);

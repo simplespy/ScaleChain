@@ -103,8 +103,8 @@ impl Contract {
                                 Message::GetTxReceipt(tx_hash) => {
                                     self.get_tx_receipt(handle, tx_hash);
                                 },
-                                Message::GetAll => {
-                                    self.test_get_all();
+                                Message::GetAll((init_hash, start, end)) => {
+                                    self.get_all(handle, init_hash, start, end);
                                 },
                                 //...
                                 _ => {
@@ -346,9 +346,11 @@ impl Contract {
         if self.get_tx_receipt(handle, tx_hash) {
             // broadcast to peers
             let curr_state = self._get_curr_state();
+             println!("broadcast to peer");       
             self.send_p2p(curr_state, block);
         } else {
             // return transaction back to mempool
+            println!("get_tx_receipt fail");       
             let mut mempool = self.mempool.lock().expect("api change mempool size");
             mempool.return_block(block);
             drop(mempool);           
@@ -392,12 +394,21 @@ impl Contract {
     }
 
     pub fn test_get_all(&self) {
-        let res = self.get_all([0u8; 32], 0, 9999999);
-        println!("{:#?}", res);
+        //let res = self._get_all();
+        //println!("{:#?}", res);
 
     }
 
-    pub fn get_all(&self, init_hash: [u8;32], start: usize, end: usize) -> Vec<ContractState> {
+    // TODO needs to return error when connection too long 
+    // or connection fails
+    pub fn get_all(&self, handle: Handle, init_hash: [u8;32], start: usize, end: usize) {
+        let contract_list = self._get_all(init_hash, start, end);
+        let response = Response::GetAll(contract_list);
+        let answer = Answer::Success(response);
+        handle.answer_channel.unwrap().send(answer);
+    }
+
+    pub fn _get_all(&self, init_hash: [u8;32], start: usize, end: usize) -> Vec<ContractState> {
         let mut curr_hash = init_hash;
         let func_sig = "ae8d0145";
         let mut block_list: Vec<String> = Vec::new();
