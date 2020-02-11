@@ -53,8 +53,13 @@ impl Performer {
     // TODO  compute H256
     pub fn compute_local_curr_hash(&self, block: Block, local_hash: H256) -> H256 {
         let block_ser = block.ser();
-        let local_hash: H256 = hash(&block_ser);
-        return H256::default();
+        let block_hash: [u8; 32] = hash(&block_ser).into();
+        let chain = self.chain.lock().unwrap();
+        let state = chain.get_latest_state().unwrap();
+        let curr_hash: [u8; 32] = state.curr_hash.into();
+        let concat_str = [curr_hash, block_hash].concat();
+        let local_hash: H256 = hash(&concat_str);
+        return local_hash;
     }
 
     fn get_eth_contract_state(&self, init_hash: [u8;32], start: usize, end: usize) -> Vec<ContractState> {
