@@ -32,6 +32,12 @@ use rand::Rng;
 use std::net::{SocketAddr};
 use crossbeam::channel as cbchannel;
 
+use contract::interface::{Handle, Answer};
+use contract::interface::Message as ContractMessage;
+use contract::interface::Response as ContractResponse;
+
+
+
 fn main() {
     let matches = clap_app!(myapp =>
         (version: "0.0")
@@ -61,7 +67,7 @@ fn main() {
     let block_db = Arc::new(Mutex::new(BlockDb::new()));
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
 
-    let (task_sender, task_receiver) = mpsc::channel();
+    let (task_sender, task_receiver) =cbchannel::unbounded();
     let (server, server_control_sender) = network::server::Context::new(
         task_sender.clone(), 
         listen_socket
@@ -76,10 +82,13 @@ fn main() {
         server_control_sender.clone(),
         contract_handle_receiver,
         mempool.clone(),
+        blockchain.clone(),
     ); 
 
 
     contract.start();
+    sync_chain(contract_handle_sender.clone());
+
     // create main actors
     let mut performer = Performer::new(
         task_receiver, 
@@ -99,7 +108,13 @@ fn main() {
     let (tx_gen, tx_control_sender) = TransactionGenerator::new(mempool.clone());
     tx_gen.start();
 
-    ApiServer::start(api_socket, tx_control_sender, mempool.clone(), contract_handle_sender.clone());
+    ApiServer::start(
+        api_socket, 
+        tx_control_sender, 
+        mempool.clone(), 
+        contract_handle_sender.clone(), 
+        blockchain.clone()
+    );
 
     // connect to peer
     let f = File::open(neighbor_path).expect("Unable to open file");
@@ -143,7 +158,7 @@ fn main() {
     }
    
 
-
+    /*
     let mut text_i = 0;
     loop {
         if true {
@@ -165,5 +180,36 @@ fn main() {
             thread::sleep(sleep_time);
         }
     }
+    */
     thread::park();
+}
+
+pub fn sync_chain(contract_channel: cbchannel::Sender<Handle>) -> usize {
+    let (answer_tx, answer_rx) = cbchannel::bounded(1);
+    let handle = Handle {
+        message: ContractMessage::SyncChain,
+        answer_channel: Some(answer_tx),
+    };
+    contract_channel.send(handle);
+    let chain_len = match answer_rx.recv() {
+        Ok(answer) => {
+            match answer {
+                Answer::Success(response) => {
+                    match response {
+                        ContractResponse::SyncChain(chain_len) => chain_len,
+                        _ => {
+                            panic!("answer to GetMainNodes: invalid response type");
+                        },
+                    }
+                },
+                Answer::Fail(reason) => {
+                    panic!("sync chain failure");
+                },
+            }
+        },
+        Err(e) => {
+            panic!("sync chain failure error");
+        },
+    };   
+    chain_len
 }

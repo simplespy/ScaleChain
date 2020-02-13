@@ -7,8 +7,8 @@ use std::io::{self, Read, Write};
 use super::peer::{PeerContext, PeerDirection};
 use super::MSG_BUF_SIZE;
 use super::message::{Message, ServerSignal, ConnectResult, ConnectHandle, TaskRequest};
-use std::sync::mpsc::{self, TryRecvError};
 use mio_extras::channel::{self, Receiver};
+use crossbeam::channel as cbchannel;
 use log::{info};
 
 // refer to https://sergey-melnychuk.github.io/2019/08/01/rust-mio-tcp-server/ 
@@ -24,7 +24,7 @@ pub struct Context {
     poll: mio::Poll,
     peers: HashMap<Token, PeerContext>,
     token_counter: usize,
-    task_sender: mpsc::Sender<TaskRequest>,
+    task_sender: cbchannel::Sender<TaskRequest>,
     response_receiver: HashMap<Token, channel::Receiver<Message>>,
     api_receiver: channel::Receiver<ServerSignal>,
     local_addr: SocketAddr,
@@ -32,7 +32,7 @@ pub struct Context {
 
 impl Context {
     pub fn new(
-        task_sender: mpsc::Sender<TaskRequest>, 
+        task_sender: cbchannel::Sender<TaskRequest>, 
         addr: SocketAddr, 
     ) -> (Context, channel::Sender<ServerSignal>) {
         let (control_tx, control_rx) = channel::channel();
@@ -194,7 +194,7 @@ impl Context {
                                                 msg: peer.request.clone()
                                             };
                                             //println!("send task to performer");
-                                            self.task_sender.send(performer_task).expect("send request to worker");
+                                            self.task_sender.send(performer_task).expect("send request to performer");
                                         },
                                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                                             break; 

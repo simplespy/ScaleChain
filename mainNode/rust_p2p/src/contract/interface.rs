@@ -16,6 +16,7 @@ pub enum Response {
     MainNodesList(Vec<Address>),
     TxReceipt(TransactionReceipt),
     GetAll(Vec<ContractState>),
+    SyncChain(usize),
 }
 #[derive(Clone)]
 pub enum Answer {
@@ -31,6 +32,7 @@ pub enum Message {
     GetMainNodes,
     GetTxReceipt(H256),
     GetAll(([u8;32], usize, usize)), //inithash, start, end
+    SyncChain,
 }
 
 pub enum Error {

@@ -3,6 +3,7 @@ use super::primitive::hash::{H256};
 use super::network::message::{ServerSignal, TaskRequest};
 use super::network::message::Message as ServerMessage;
 use super::mempool::mempool::{Mempool};
+use super::blockchain::blockchain::{BlockChain};
 use super::interface::{Handle, Message, Response, Answer};
 
 use web3::contract::Contract as EthContract;
@@ -14,13 +15,12 @@ use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::{time};
 use std::io::{Result};
 use std::process::Command;
 
-use crossbeam::channel::{Receiver};
+use crossbeam::channel::{Sender, Receiver};
 use serde::{Serialize, Deserialize};
 use ethereum_tx_sign::RawTransaction;
 
@@ -34,9 +34,10 @@ pub struct Contract {
     contract_state: ContractState,
     contract_handle: Receiver<Handle>,
     mempool: Arc<Mutex<Mempool>>,
-    performer_sender: mpsc::Sender<TaskRequest>,
+    performer_sender: Sender<TaskRequest>,
     server_control_sender: MioSender<ServerSignal>,
-    web3: web3::api::Web3<web3::transports::Http>
+    web3: web3::api::Web3<web3::transports::Http>,
+    chain: Arc<Mutex<BlockChain>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -50,10 +51,11 @@ pub struct Account {
 impl Contract {
     pub fn new(
         account: Account, 
-        performer_sender: mpsc::Sender<TaskRequest>,
+        performer_sender: Sender<TaskRequest>,
         server_control_sender: MioSender<ServerSignal>,
         contract_handle: Receiver<Handle>, 
         mempool: Arc<Mutex<Mempool>>,
+        chain: Arc<Mutex<BlockChain>>,
     ) -> Contract {
         let (eloop, http) = web3::transports::Http::new(&account.rpc_url).unwrap();
         eloop.into_remote();
@@ -71,6 +73,7 @@ impl Contract {
             contract_handle,
             web3,
             mempool,
+            chain,
         };
 
         return contract;
@@ -106,6 +109,10 @@ impl Contract {
                                 Message::GetAll((init_hash, start, end)) => {
                                     self.get_all(handle, init_hash, start, end);
                                 },
+                                Message::SyncChain => {
+                                    self.sync_etherchain(handle);
+                                   
+                                }
                                 //...
                                 _ => {
                                     println!("Unrecognized Message");
@@ -389,8 +396,15 @@ impl Contract {
     }
 
     // pull function to get updated, return number of state change, 0 for no change 
-    pub fn sync_etherchain(&self) -> Result<usize> {
-         unimplemented!()   
+    pub fn sync_etherchain(&self, handle: Handle) {
+        let states = self._get_all([0 as u8;32], 0, 9999999);
+        let chain_len: usize = states.len();
+        let mut chain = self.chain.lock().unwrap();
+        chain.replace(states);
+        drop(chain);
+        let response = Response::SyncChain(chain_len);
+        let answer = Answer::Success(response);
+        handle.answer_channel.unwrap().send(answer);
     }
 
     pub fn test_get_all(&self) {
@@ -421,18 +435,26 @@ impl Contract {
 
         let response = requests::get(request_url).unwrap();
         let data = response.json().unwrap();
-        for i in {0..data["result"].len()} {
+        let result = data["result"].clone();
+        let result_num = result.len();
+        //println!("result_num {}", result_num);
+        //println!("result {}", result);
+
+        for i in 0..result_num {
             if data["result"][i]["input"].as_str().unwrap().len() < 10 {continue;}
             let sig = &data["result"][i]["input"].as_str().unwrap()[2..10];
             let isError = data["result"][i]["isError"].as_str().unwrap().parse::<i32>().unwrap();
             if sig == func_sig && isError == 0 {
                 let input = &data["result"][i]["input"].as_str().unwrap()[10..];
+                //println!("input {:?}", input);   
                 let command = format!("ethabi decode params -t string -t bytes -t uint256 {}", input);
+                //println!("command {:?}", command);   
                 let output = Command::new("sh").arg("-c")
                     .arg(command)
                     .output().unwrap();
                 let params = std::str::from_utf8(&output.stdout).unwrap().split("\n");
                 let params: Vec<&str> = params.collect();
+                //println!("ethabu output {:?}", params);   
                 let block = params[0].replace("string ", "");
                 let block_id = params[2].replace("uint256 ", "");
                 let block_id = usize::from_str_radix(&block_id, 16).unwrap();
@@ -450,7 +472,7 @@ impl Contract {
                     curr_hash: H256(curr_hash),
                     block_id,
                 })
-            }
+            } 
         }
         return state_list;
     }

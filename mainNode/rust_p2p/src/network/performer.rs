@@ -12,13 +12,13 @@ use super::contract::interface::{Handle, Answer};
 use super::contract::interface::Error as ContractError;
 use super::primitive::block::ContractState;
 use std::sync::{Arc, Mutex};
-use crossbeam::channel::{self, Sender};
+use crossbeam::channel::{self, Sender, Receiver};
 use super::primitive::hash::{H256};
 use super::crypto::hash;
 use super::primitive::block::{Block, MainNodeBlock};
 
 pub struct Performer {
-    task_source: mpsc::Receiver<TaskRequest>,
+    task_source: Receiver<TaskRequest>,
     chain: Arc<Mutex<BlockChain>>, 
     block_db: Arc<Mutex<BlockDb>>,
     mempool: Arc<Mutex<Mempool>>,
@@ -27,7 +27,7 @@ pub struct Performer {
 
 impl Performer {
     pub fn new(
-        task_source: mpsc::Receiver<TaskRequest>, 
+        task_source: Receiver<TaskRequest>, 
         blockchain: Arc<Mutex<BlockChain>>,
         block_db: Arc<Mutex<BlockDb>>,
         mempool: Arc<Mutex<Mempool>>,
@@ -51,11 +51,15 @@ impl Performer {
     }
 
     // TODO  compute H256
-    pub fn compute_local_curr_hash(&self, block: Block, local_hash: H256) -> H256 {
+    pub fn compute_local_curr_hash(
+        &self, 
+        state: ContractState, 
+        block: Block,
+        local_hash: H256
+    ) -> H256 {
         let block_ser = block.ser();
         let block_hash: [u8; 32] = hash(&block_ser).into();
-        let chain = self.chain.lock().unwrap();
-        let state = chain.get_latest_state().unwrap();
+        
         let curr_hash: [u8; 32] = state.curr_hash.into();
         let concat_str = [curr_hash, block_hash].concat();
         let local_hash: H256 = hash(&concat_str);
@@ -93,7 +97,7 @@ impl Performer {
         chain_state: ContractState,
         blockchain: &mut BlockChain,
     ) {
-        let eth_states = self.get_eth_contract_state([0;32], 0, 0);         
+        let eth_states = self.get_eth_contract_state([0;32], 0, 9999999);         
         blockchain.replace(eth_states);
         //if chain_state.block_id > peer_state.block_id {
         //    let eth_state = eth_states[peer_state.block_id];
@@ -125,7 +129,8 @@ impl Performer {
                         Some(s) => s,
                         None => {
                         // TODO chain initialization, but need to handle case when eth chain is 0 too
-                            let eth_states = self.get_eth_contract_state([0;32], 0, 0);         
+                            let eth_states = self.get_eth_contract_state([0;32], 0, 9999999);         
+                            println!("replace blockchain");
                             chain.replace(eth_states);               
                             chain.get_latest_state().unwrap()
                         }
@@ -133,13 +138,20 @@ impl Performer {
                     
                     if chain_state.block_id == peer_state.block_id - 1 {
                         // 1. compute curr_hash locally using all prev blocks stored in block_db
-                        let local_update_hash = self.compute_local_curr_hash(peer_block, chain_state.curr_hash);
+                        let local_update_hash = self.compute_local_curr_hash(
+                            chain_state,
+                            peer_block, 
+                            chain_state.curr_hash
+                        );
+
                         if local_update_hash == peer_state.curr_hash {
                             // add to blockchain
                             chain.insert(&peer_state);;
                         } else {
                             // sync one block
-                            self.update_local_chain(peer_state, chain_state, &mut chain);
+                            let eth_states = self.get_eth_contract_state([0;32], 0, 9999999);         
+                            chain.replace(eth_states);               
+                            chain.get_latest_state().unwrap();
                         }
                     } else if chain_state == peer_state {
                         println!("receive block already present in blockchain");    
@@ -155,6 +167,7 @@ impl Performer {
                 Message::SendTransaction(transaction) => {
                     let mut mempool = self.mempool.lock().expect("perform locl mempool");
                     mempool.insert(transaction);
+                    drop(mempool);
                 },
             }
         } 

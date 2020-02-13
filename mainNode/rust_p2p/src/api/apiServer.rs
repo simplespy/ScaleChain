@@ -2,9 +2,9 @@ extern crate tiny_http;
 
 use super::{TxGenSignal};
 use super::mempool::mempool::{Mempool};
+use super::blockchain::blockchain::BlockChain;
 use super::contract::interface::{Message, Handle, Answer};
 use super::contract::interface::Response as ContractResponse;
-use std::sync::mpsc::{self};
 use crossbeam::channel::{self, Sender};
 use std::thread;
 use tiny_http::{Server, Response, Header};
@@ -13,6 +13,8 @@ use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::collections::{HashMap};
 use serde::{Serialize};
+use super::network::message::{PeerHandle};
+use super::network::message::Message as PerformerMessage;
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -23,6 +25,7 @@ pub struct ApiServer {
 pub struct RequestContext {
     tx_control: Sender<TxGenSignal>,
     mempool: Arc<Mutex<Mempool>>,
+    chain: Arc<Mutex<BlockChain>>,
     contract_channel: Sender<Handle>,
 }
 
@@ -51,13 +54,16 @@ impl ApiServer {
     pub fn start(socket: SocketAddr, 
                  tx_control: Sender<TxGenSignal>, 
                  mempool: Arc<Mutex<Mempool>>,
-                 contract_channel: Sender<Handle>) {
+                 contract_channel: Sender<Handle>,
+                 chain: Arc<Mutex<BlockChain>>,
+    ) {
         let server = Server::http(&socket).unwrap();
         let _handler = thread::spawn(move || {
             for request in server.incoming_requests() {
                 let rc = RequestContext {
                     tx_control: tx_control.clone(),
                     mempool: mempool.clone(),
+                    chain: chain.clone(),
                     contract_channel: contract_channel.clone(),
                 };
                 // new thread per request
@@ -91,6 +97,14 @@ impl ApiServer {
                             };
                             rc.tx_control.send(TxGenSignal::Step(step));
                             respond_result!(request, true, "ok");
+                        },
+                        "/blockchain/get-curr-state" => {
+                            println!("before /blockchain/get-curr-state lock" );
+                            let mut chain = rc.chain.lock().expect("api get-curr-state");
+                            println!("after /blockchain/get-curr-state lock" );
+                            let state = chain.get_latest_state();
+                            drop(chain);
+                            respond_result!(request, true, format!("{:?}", state));
                         },
                         "/mempool/change-size" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
@@ -289,8 +303,39 @@ impl ApiServer {
                             };
                             rc.contract_channel.send(handle);
                         },
+                        "/contract/sync-chain" => {
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: Message::SyncChain,
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+                            let chain_len = match answer_rx.recv() {
+                                Ok(answer) => {
+                                    match answer {
+                                        Answer::Success(response) => {
+                                            match response {
+                                                ContractResponse::SyncChain(chain_len) => chain_len,
+                                                _ => {
+                                                    panic!("answer to GetMainNodes: invalid response type");
+                                                },
+                                            }
+                                        },
+                                        Answer::Fail(reason) => {
+                                            respond_result!(request, false, format!("contract query fails {}", reason));
+                                            return;
+                                        },
+                                    }
+                                },
+                                Err(e) => {
+                                    respond_result!(request, false, format!("contract channel broken"));
+                                    return;
+                                },
+                            };
+                            respond_result!(request, true, format!("{:?}", chain_len));
+                        },
                         _ => {
-                            println!("all other option");
+                            println!("all other option {:?}", url.path());
                         }
                     }
 
