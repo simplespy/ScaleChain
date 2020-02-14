@@ -4,19 +4,24 @@ use super::block::{Transaction, Input, Output};
 
 use std::sync::{Mutex, Arc};
 use std::thread;
+use std::fs::File;
+use std::io::{Write, BufReader, BufRead, Error};
 use crossbeam::channel::{self, Sender, Receiver, TryRecvError};
 
+use requests::{ToJson};
 
 pub enum TxGenSignal {
     Start,
     Stop,
     Step(usize),
+    Simulate,
 }
 
 pub enum State {
     Continuous,
     Pause,
     Step(usize),
+    Simulate,
 }
 
 pub struct TransactionGenerator {
@@ -68,10 +73,23 @@ impl TransactionGenerator {
                             },
                             Err(TryRecvError::Disconnected) => panic!("disconnected tx_gen control signal"),
                         }
+                    },
+                    State::Simulate => {
+                        let transactions = self.generate_transaction_from_history();
+                        self.estimate_gas(transactions);
+                        self.state = State::Pause;
                     }
                 }
             }
         });
+    }
+
+    fn estimate_gas(&mut self, transactions: Vec<Transaction>) {
+        let mut mempool = self.mempool.lock().expect("tx gen lock mempool");
+        for tx in transactions {
+            mempool.estimate_gas(tx);
+        }
+        drop(mempool);
     }
 
     fn send_to_mempool(&mut self, transactions: Vec<Transaction>) {
@@ -94,6 +112,10 @@ impl TransactionGenerator {
                 self.state = State::Step(num);
                 println!("rx step {}", num);
             },
+            TxGenSignal::Simulate => {
+                self.state = State::Simulate;
+                println!("Start simulation");
+            }
         }
     }
 
@@ -110,6 +132,7 @@ impl TransactionGenerator {
             tx_hash: H256::new(), 
             index: 0,
             unlock: H256::new(),
+            content: Vec::new()
         };
 
         let output = Output {
@@ -125,5 +148,62 @@ impl TransactionGenerator {
         transaction.update_hash();
         
         transaction
+    }
+
+    fn generate_transaction_from_history(&self) -> Vec<Transaction> {
+        let mut file = File::create("gas_history.csv").unwrap();
+        let mut transactions: Vec<Transaction> = vec![];
+        let request_url = format!("http://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock={start}&endblock={end}&sort=asc&apikey={apikey}&page={page}&offset={offset}",
+                                  address = "0x06012c8cf97bead5deae237070f9587f8e7a266d",//"0x732de7495deecae6424c3fc3c46e47d6b4c5374e",
+                                  start = 5752558,
+                                  end = 9463322,
+                                  apikey = "UGEFW13C4HVZ9GGH5GWIRHQHYYPYKX7FCX",
+                                  page = 1,
+                                  offset = 1000);
+        /*let request_url = format!("http://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock={start}&endblock={end}&sort=asc&apikey={apikey}&page={page}&offset={offset}",
+                                  address = "0x1985365e9f78359a9B6AD760e32412f4a445E862",
+                                  start = 8752558,
+                                  end = 9478235,
+                                  apikey = "UGEFW13C4HVZ9GGH5GWIRHQHYYPYKX7FCX",
+                                  page = 1,
+                                  offset = 1000);*/
+        println!("{:?}", request_url);
+        let response = requests::get(request_url).unwrap();
+        let data = response.json().unwrap();
+        let txs = data["result"].clone();
+        let mut i = 0;
+        for tx in txs.members() {
+            let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
+
+            if isError == 0 && tx["to"].as_str().unwrap() == "0x06012c8cf97bead5deae237070f9587f8e7a266d" {
+            //if isError == 0 && tx["to"].as_str().unwrap() == "0x1985365e9f78359a9b6ad760e32412f4a445e862" {
+                let tx_hash = String::from(tx["hash"].as_str().unwrap());
+                let content = String::from(tx["input"].as_str().unwrap()).replace("0x", "");
+                let address = String::from(tx["from"].as_str().unwrap());
+                let gas_used = String::from(tx["gas"].as_str().unwrap());
+                let gas_used = usize::from_str_radix(&gas_used, 10).unwrap();
+                i += 1;
+                file.write_all(format!("{},{}\n",i,gas_used).as_bytes());
+                let mut tx = Transaction{
+                    inputs: vec![Input {
+                        tx_hash: H256::from(tx_hash),
+                        index: 0,
+                        unlock: H256::new(),
+                        content: hex::decode(&content).unwrap()
+                    }],
+                    outputs: vec![Output {
+                        address: self.my_addr[0],
+                        value: 10
+                    }],
+                    is_coinbase: false,
+                    hash: H256::default()
+                };
+                tx.update_hash();
+                transactions.push(tx);
+            }
+        }
+        println!("generate {} txs from history", transactions.len());
+        return transactions;
+
     }
 }

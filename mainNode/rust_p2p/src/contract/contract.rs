@@ -5,28 +5,31 @@ use super::network::message::Message as ServerMessage;
 use super::mempool::mempool::{Mempool};
 use super::blockchain::blockchain::{BlockChain};
 use super::interface::{Handle, Message, Response, Answer};
+use super::utils::*;
 
 use web3::contract::Contract as EthContract;
 use web3::contract::Options as EthOption;
-use web3::types::{Address, Bytes};
+use web3::types::{Address, Bytes, U256, TransactionReceipt, CallRequest, H160};
 use web3::futures::Future;
 
-use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 
 use std::sync::{Arc, Mutex};
 use std::{time};
-use std::io::{Result};
-use std::process::Command;
+use std::fs::{File, OpenOptions};
+use std::io::{Write, BufReader, BufRead, Error};
 
 use crossbeam::channel::{Sender, Receiver};
 use serde::{Serialize, Deserialize};
 use ethereum_tx_sign::RawTransaction;
 
-use secp256k1::{Secp256k1, SecretKey};
 use mio_extras::channel::Sender as MioSender;
-use requests::ToJson;
+
+use requests::{ToJson};
+
+const ETH_CHAIN_ID: u32 = 3;
+
 
 pub struct Contract {
     contract: EthContract<web3::transports::Http>,
@@ -86,9 +89,9 @@ impl Contract {
                     //let _ = std::thread::spawn(move || {
                         Ok(handle) => {
                             match handle.message {
-                                Message::SendBlock(_) => {
+                                Message::SendBlock(block) => {
                                     println!("send block");
-                                    self.send_block(handle);
+                                    self.send_block(block);
                                 },
                                 Message::AddMainNode(address) => {
                                     println!("add man node");
@@ -104,14 +107,16 @@ impl Contract {
                                     self.get_main_nodes(handle);
                                 },
                                 Message::GetTxReceipt(tx_hash) => {
-                                    self.get_tx_receipt(handle, tx_hash);
+                                    self.get_tx_receipt(tx_hash);
                                 },
                                 Message::GetAll((init_hash, start, end)) => {
                                     self.get_all(handle, init_hash, start, end);
                                 },
                                 Message::SyncChain => {
                                     self.sync_etherchain(handle);
-                                   
+                                },
+                                Message::EstimateGas(block) => {
+                                    self.estimate_gas(block);
                                 }
                                 //...
                                 _ => {
@@ -128,60 +133,22 @@ impl Contract {
         });
     }
 
-    fn _get_curr_state(&self) -> ContractState {
-        let hash: web3::types::H256 = self.contract
-            .query("getCurrentHash", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        let blk_id: web3::types::U256 = self.contract
-            .query("getBlockID", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        ContractState {
-            curr_hash: hash.into(),
-            block_id: blk_id.as_usize(),
-        }
-    }
-
-    fn get_curr_state(&self, handle: Handle) {
+    pub fn get_curr_state(&self, handle: Handle) {
         let curr_state = self._get_curr_state();
         let response = Response::GetCurrState(curr_state);
         let answer = Answer::Success(response);
         handle.answer_channel.unwrap().send(answer);
     }
 
-    pub fn sync(&self) -> ContractState {
-        let hash: web3::types::H256 = self.contract
-            .query("getCurrentHash", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        let blk_id: web3::types::U256 = self.contract
-            .query("getBlockID", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        ContractState {
-            curr_hash: hash.into(),
-            block_id: blk_id.as_usize()
-        }
-    }
-
     pub fn get_prev_blocks(&self, start: usize, end: usize) -> Vec<MainNodeBlock> {
         unimplemented!()
     }
 
-    fn get_main_node(&self, index: usize) -> Address {
-        let address: Address = self.contract
-            .query("getMainNode", (web3::types::U256::from(index), ), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        return address;
-    }
-
     pub fn get_main_nodes(&self, handle: Handle) {
-        let n = self._count_main_nodes().unwrap();
+        let n = self._count_main_nodes();
         let mut nodes = Vec::new();
         for i in {0..n} {
-            let address = self.get_main_node(i);
+            let address = self._get_main_node(i);
             nodes.push(address);
         }
         println!("main nodes list = {:?}", nodes);
@@ -194,17 +161,8 @@ impl Contract {
 
     }
 
-    fn _count_main_nodes(&self) -> Result<usize> {
-        let cnt: web3::types::U256 = self.contract
-            .query("mainNodesCount", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        Ok(cnt.as_usize())
-    }
-
     pub fn count_main_nodes(&self, handle: Handle){
-
-        let num_main_node = self._count_main_nodes().unwrap();
+        let num_main_node = self._count_main_nodes();
         println!("count_main_nodes = {:?}", num_main_node);
         let response = Response::CountMainNode(num_main_node);
         let answer = Answer::Success(response);
@@ -215,153 +173,73 @@ impl Contract {
     }
 
     pub fn add_main_node(&self, address: Address) {
-        const ETH_CHAIN_ID: u32 = 3;
-        let nonce = self.web3.eth()
-            .transaction_count(self.my_account.address, None)
-            .wait()
-            .unwrap();
-        let blk_id: web3::types::U256 = self.contract
-            .query("getBlockID", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-        let command = format!("ethabi encode function --lenient ./abi.json addMainNode -p {}", address);
-        let output = Command::new("sh").arg("-c")
-            .arg(command)
-            .output().unwrap();
+        let nonce = self._transaction_count();
+        let function_abi = _encode_addMainNode(address);
 
-        let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
         let tx = RawTransaction {
-            nonce: self.convert_u256(nonce),
-            to: Some(self.convert_account(self.my_account.contract_address)),
-            value: ethereum_types::U256::from(0),
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
             gas: ethereum_types::U256::from(100000),
             data: function_abi
         };
-        let pkey = self.my_account.private_key.replace("0x", "");
-        let key = self.get_private_key(pkey.as_str());
 
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash: web3::types::H256 = self.web3.eth()
-            .send_raw_transaction(Bytes::from(signed_tx))
-            .wait()
-            .unwrap();
+        let tx_hash = self._send_transaction(signed_tx);
         println!("tx_hash = {:?}", tx_hash);
-
-
     }
 
-    pub fn convert_u256(&self, value: web3::types::U256) -> ethereum_types::U256 {
-        let web3::types::U256(ref arr) = value;
-        let mut ret = [0; 4];
-        ret[0] = arr[0];
-        ret[1] = arr[1];
-        ethereum_types::U256(ret)
-    }
+    pub fn send_block(&self, block: Block)  {
+        let str_block= _block_to_str(block.clone());
+        let nonce = self._transaction_count();
+        let blk_id = self._get_blk_id();
+        let private_key = _get_key_as_vec(self.my_account.private_key.clone());
+        let signature = _sign_block(str_block.as_str(), &private_key);
+        let function_abi = _encode_sendBlock(str_block, signature, blk_id + 1);
 
-    pub fn convert_account(&self, value: Address) -> ethereum_types::H160 {
-        let ret = ethereum_types::H160::from(value.0);
-        ret
-    }
-
-    fn to_array(&self, bytes: &[u8]) -> [u8; 32] {
-        let mut array = [0; 32];
-        let bytes = &bytes[..array.len()];
-        array.copy_from_slice(bytes);
-        array
-    }
-
-    fn hash_message(&self, message: &[u8], result: &mut [u8]) {
-        let s = String::from("\x19Ethereum Signed Message:\n32");
-        let prefix = s.as_bytes();
-        let prefixed_message = [prefix, message].concat();
-        let mut hasher = Sha3::keccak256();
-        hasher.input(&prefixed_message);
-        hasher.result(result);
-    }
-
-    fn sign_block(&self, block: &str, private_key: &[u8]) -> String {
-        let mut hasher = Sha3::keccak256();
-        hasher.input_str(block);
-        let mut message = [0; 32];
-        hasher.result(&mut message);
-        let mut result = [0u8; 32];
-        self.hash_message(&message, &mut result);
-
-        let secp = Secp256k1::new();
-        let sk = SecretKey::from_slice(private_key).unwrap();
-        let msg = secp256k1::Message::from_slice(&result).unwrap();
-        let sig = secp.sign_recoverable(&msg, &sk);
-        let (v, data) = sig.serialize_compact();
-        let mut r: [u8; 32] = [0; 32];
-        let mut s: [u8; 32] = [0; 32];
-        r.copy_from_slice(&data[0..32]);
-        s.copy_from_slice(&data[32..64]);
-        return format!("{}{}{}", hex::encode(r), hex::encode(s), hex::encode([v.to_i32() as u8 + 27]));
-    }
-
-    pub fn get_private_key(&self, key: &str) -> ethereum_types::H256 {
-        let private_key = hex::decode(key).unwrap();
-
-        return ethereum_types::H256(self.to_array(private_key.as_slice()));
-    }
-
-    pub fn send_block(&self, handle: Handle)  {
-        let block = match handle.clone().message {
-            Message::SendBlock(block) => block,
-            _ => panic!("contract send block not receive block"), 
-        };
-        let block_vec: Vec<u8> = block.clone().ser();
-        let block_ref: &[u8] = block_vec.as_ref();
-        let str_block= hex::encode(block_ref);
-        const ETH_CHAIN_ID: u32 = 3;
-        let nonce = self.web3.eth()
-            .transaction_count(self.my_account.address, None)
-            .wait()
-            .unwrap();
-        let blk_id: web3::types::U256 = self.contract
-            .query("getBlockID", (), None, EthOption::default(), None)
-            .wait()
-            .unwrap();
-       // let block = "hello";
-        let pkey = self.my_account.private_key.replace("0x", "");
-        let private_key = hex::decode(pkey.as_str()).unwrap();
-        let signature = self.sign_block(str_block.as_str(), &private_key);
-
-        let command = format!("ethabi encode function --lenient ./abi.json sendBlock -p {} -p {} -p {}", str_block, signature, blk_id+1);
-        let output = Command::new("sh").arg("-c")
-            .arg(command)
-            .output().unwrap();
-
-        let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+        let gas = self._estimate_gas(function_abi.clone());
         let tx = RawTransaction {
-            nonce: self.convert_u256(nonce),
-            to: Some(self.convert_account(self.my_account.contract_address)),
-            value: ethereum_types::U256::from(0),
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
-            gas: ethereum_types::U256::from(100000),
+            gas: _convert_u256(gas),
             data: function_abi
         };
-        let key = self.get_private_key(pkey.as_str());
 
+
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash: web3::types::H256 = self.web3.eth()
-            .send_raw_transaction(Bytes::from(signed_tx))
-            .wait()
-            .unwrap();
+        let tx_hash = self._send_transaction(signed_tx);
         println!("tx_hash = {:?}", tx_hash);
-        if self.get_tx_receipt(handle, tx_hash) {
+
+        if self.get_tx_receipt(tx_hash) {
             // broadcast to peers
             let curr_state = self._get_curr_state();
-             println!("broadcast to peer");       
+             println!("broadcast to peer");
             self.send_p2p(curr_state, block);
         } else {
             // return transaction back to mempool
-            println!("get_tx_receipt fail");       
+            println!("get_tx_receipt fail");
             let mut mempool = self.mempool.lock().expect("api change mempool size");
             mempool.return_block(block);
-            drop(mempool);           
+            drop(mempool);
         }
+    }
+
+    pub fn estimate_gas(&self, block: Block) -> U256 {
+        let mut file = OpenOptions::new().append(true).open("gas_history.csv").unwrap();
+        let str_block= _block_to_str(block.clone());
+        let nonce = self._transaction_count();
+        let blk_id = self._get_blk_id();
+        let private_key = _get_key_as_vec(self.my_account.private_key.clone());
+        let signature = _sign_block(str_block.as_str(), &private_key);
+        let function_abi = _encode_sendBlock(str_block, signature, blk_id + 1);
+        let gas = self._estimate_gas(function_abi.clone());
+        file.write_all(format!("{}\n ", gas).as_bytes());
+        return gas;
     }
 
     fn send_p2p(&self, curr_state: ContractState, block: Block) {
@@ -375,24 +253,18 @@ impl Contract {
         self.server_control_sender.send(p2p_message); 
     }
 
-    pub fn get_tx_receipt(&self, handle: Handle, tx_hash: web3::types::H256) -> bool {
+    pub fn get_tx_receipt(&self, tx_hash: web3::types::H256) -> bool {
         let now = time::Instant::now();
-        let mut receipt = self.web3.eth()
-            .transaction_receipt(tx_hash)
-            .wait()
-            .unwrap();
+        let mut receipt = self._transaction_receipt(tx_hash.clone());
         while receipt.is_none() {
-            receipt = self.web3.eth()
-                .transaction_receipt(tx_hash)
-                .wait()
-                .unwrap();
+            receipt = self._transaction_receipt(tx_hash.clone());
             if now.elapsed().as_secs() > 60 {
                 println!("Transaction TimeOut");
                 return false;
             }
         }
+        println!("Gas Used = {}", receipt.unwrap().gas_used.unwrap());
         return true;
-    
     }
 
     // pull function to get updated, return number of state change, 0 for no change 
@@ -405,12 +277,6 @@ impl Contract {
         let response = Response::SyncChain(chain_len);
         let answer = Answer::Success(response);
         handle.answer_channel.unwrap().send(answer);
-    }
-
-    pub fn test_get_all(&self) {
-        //let res = self._get_all();
-        //println!("{:#?}", res);
-
     }
 
     // TODO needs to return error when connection too long 
@@ -435,29 +301,15 @@ impl Contract {
 
         let response = requests::get(request_url).unwrap();
         let data = response.json().unwrap();
-        let result = data["result"].clone();
-        let result_num = result.len();
-        //println!("result_num {}", result_num);
-        //println!("result {}", result);
+        let txs = data["result"].clone();
 
-        for i in 0..result_num {
-            if data["result"][i]["input"].as_str().unwrap().len() < 10 {continue;}
-            let sig = &data["result"][i]["input"].as_str().unwrap()[2..10];
-            let isError = data["result"][i]["isError"].as_str().unwrap().parse::<i32>().unwrap();
+        for tx in txs.members() {
+            if tx["input"].as_str().unwrap().len() < 10 {continue;}
+            let sig = &tx["input"].as_str().unwrap()[2..10];
+            let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
             if sig == func_sig && isError == 0 {
-                let input = &data["result"][i]["input"].as_str().unwrap()[10..];
-                //println!("input {:?}", input);   
-                let command = format!("ethabi decode params -t string -t bytes -t uint256 {}", input);
-                //println!("command {:?}", command);   
-                let output = Command::new("sh").arg("-c")
-                    .arg(command)
-                    .output().unwrap();
-                let params = std::str::from_utf8(&output.stdout).unwrap().split("\n");
-                let params: Vec<&str> = params.collect();
-                //println!("ethabu output {:?}", params);   
-                let block = params[0].replace("string ", "");
-                let block_id = params[2].replace("uint256 ", "");
-                let block_id = usize::from_str_radix(&block_id, 16).unwrap();
+                let input = &tx["input"].as_str().unwrap()[10..];
+                let (block, block_id) = _decode_sendBlock(input);
 
                 block_list.push(block.clone());
                 let mut hasher = Sha256::new();
@@ -474,7 +326,85 @@ impl Contract {
                 })
             } 
         }
+       // println!("{:#?}", state_list);
         return state_list;
+    }
+
+    fn _get_blk_id(&self) -> U256 {
+        self.contract
+            .query("getBlockID", (), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+    }
+
+    fn _transaction_count(&self) -> U256 {
+        self.web3.eth()
+            .transaction_count(self.my_account.address, None)
+            .wait()
+            .unwrap()
+    }
+
+    fn _get_curr_hash(&self) -> web3::types::H256 {
+        self.contract
+            .query("getCurrentHash", (), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+    }
+
+    fn _get_curr_state(&self) -> ContractState {
+        let hash = self._get_curr_hash();
+        let blk_id = self._get_blk_id();
+        ContractState {
+            curr_hash: hash.into(),
+            block_id: blk_id.as_usize(),
+        }
+    }
+
+    fn _count_main_nodes(&self) -> usize {
+        let cnt: U256 = self.contract
+            .query("mainNodesCount", (), None, EthOption::default(), None)
+            .wait()
+            .unwrap();
+            cnt.as_usize()
+    }
+
+    fn _get_main_node(&self, index: usize) -> Address {
+        self.contract
+            .query("getMainNode", (web3::types::U256::from(index), ), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+    }
+
+    fn _send_transaction(&self, signed_tx: Vec<u8>) -> web3::types::H256 {
+        self.web3.eth()
+            .send_raw_transaction(Bytes::from(signed_tx))
+            .wait()
+            .unwrap()
+    }
+
+    fn _transaction_receipt(&self, tx_hash: web3::types::H256) -> Option<TransactionReceipt> {
+        self.web3.eth()
+            .transaction_receipt(tx_hash)
+            .wait()
+            .unwrap()
+    }
+
+    fn _estimate_gas(&self, data: Vec<u8>) -> U256 {
+        let call_request = CallRequest {
+            from: Some(H160::from(self.my_account.address.0)),
+            to: H160::from(self.my_account.contract_address.0),
+            gas_price: Some(U256::from(1000000000u64)),
+            gas: Some(U256::zero()),
+            data: Some(Bytes::from(data)),
+            value: Some(U256::zero())
+        };
+
+        let gas =
+            self.web3.eth()
+                .estimate_gas(call_request, None)
+                .wait()
+                .unwrap();
+        gas
     }
 
 

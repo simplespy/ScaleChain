@@ -33,6 +33,7 @@ pub enum Message {
     GetTxReceipt(H256),
     GetAll(([u8;32], usize, usize)), //inithash, start, end
     SyncChain,
+    EstimateGas(Block),
 }
 
 pub enum Error {

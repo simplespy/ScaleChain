@@ -106,7 +106,8 @@ impl Transaction {
 pub struct Input {
     pub tx_hash: H256,
     pub index: u8,
-    pub unlock: H256, 
+    pub unlock: H256,
+    pub content: Vec<u8>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Default, PartialEq, Eq)]
@@ -114,3 +115,4 @@ pub struct Output {
     pub address: H256, //lock
     pub value: u64,
 }
+

@@ -1,5 +1,6 @@
 pub mod contract;
 pub mod interface;
+pub mod utils;
 
 use super::primitive;
 use super::network;

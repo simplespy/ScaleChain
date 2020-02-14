@@ -79,3 +79,12 @@ impl From<web3::types::H256> for H256 {
 }
 
 
+impl From<String> for H256 {
+    fn from(h: String) -> H256 {
+        let h = h.replace("0x", "");
+        let h = hex::decode(&h).unwrap();
+        let mut tx_hash: [u8; 32] = [0; 32];
+        tx_hash.copy_from_slice(h.as_ref());
+        H256 ( tx_hash)
+    }
+}

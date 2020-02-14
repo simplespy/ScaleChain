@@ -94,5 +94,20 @@ impl Mempool {
             self.send_block();
         }
     }
+
+    pub fn estimate_gas(&mut self, transaction: Transaction) {
+        self.transactions.push_back(transaction);
+        if self.transactions.len() >= self.block_size {
+            let mut block = self.prepare_block();
+            block.update_root();
+            block.update_hash();
+            let message = Message::EstimateGas(block);
+            let handle = Handle {
+                message: message,
+                answer_channel: None,
+            };
+            self.contract_handler.send(handle);
+        }
+    }
 }
 

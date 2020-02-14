@@ -98,6 +98,10 @@ impl ApiServer {
                             rc.tx_control.send(TxGenSignal::Step(step));
                             respond_result!(request, true, "ok");
                         },
+                        "/transaction-generator/simulate" => {
+                            rc.tx_control.send(TxGenSignal::Simulate);
+                            respond_result!(request, true, "ok");
+                        },
                         "/blockchain/get-curr-state" => {
                             println!("before /blockchain/get-curr-state lock" );
                             let mut chain = rc.chain.lock().expect("api get-curr-state");
