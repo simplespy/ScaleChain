@@ -15,6 +15,7 @@ use std::collections::{HashMap};
 use serde::{Serialize};
 use super::network::message::{PeerHandle};
 use super::network::message::Message as PerformerMessage;
+use super::experiment::snapshot::{PERFORMANCE_COUNTER};
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -73,6 +74,13 @@ impl ApiServer {
                     let url = url_base.join(url_path).expect("join url base and path");
                     
                     match url.path() {
+                        "/telematics/snapshot" => {
+                            let snapshot = PERFORMANCE_COUNTER.snapshot();
+                            let content_type = "Content-Type: application/json".parse::<Header>().unwrap();
+                            let response = Response::from_string(serde_json::to_string(&snapshot).unwrap()).with_header(content_type);
+                            request.respond(response);
+        
+                        },
                         "/transaction-generator/start" => {
                             rc.tx_control.send(TxGenSignal::Start);
                         },

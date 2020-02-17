@@ -7,6 +7,7 @@ use std::thread;
 use std::fs::File;
 use std::io::{Write, BufReader, BufRead, Error};
 use crossbeam::channel::{self, Sender, Receiver, TryRecvError};
+use super::snapshot::PERFORMANCE_COUNTER;
 
 use requests::{ToJson};
 
@@ -110,7 +111,6 @@ impl TransactionGenerator {
             },
             TxGenSignal::Step(num) => {
                 self.state = State::Step(num);
-                println!("rx step {}", num);
             },
             TxGenSignal::Simulate => {
                 self.state = State::Simulate;
@@ -123,6 +123,7 @@ impl TransactionGenerator {
         let mut transactions: Vec<Transaction> = vec![];
         for _ in 0..num {
             transactions.push(self.create_transaction()); 
+            PERFORMANCE_COUNTER.record_generated_transactions();
         }
         transactions
     } 

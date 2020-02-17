@@ -4,6 +4,7 @@ use super::fork::{ForkBuffer};
 use super::block::{Header};
 use std::collections::{HashMap};
 use super::primitive::block::{ContractState};
+use super::experiment::snapshot::PERFORMANCE_COUNTER;
 
 pub struct BlockChain {
     blockchain: Vec<ContractState>,
@@ -28,6 +29,7 @@ impl BlockChain {
 
     pub fn replace(&mut self, chain: Vec<ContractState>) {
         self.blockchain = chain;
+        PERFORMANCE_COUNTER.store_chain_depth(self.blockchain.len());
     }
 
     // block id should start at 0, so is consistent with height

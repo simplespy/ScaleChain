@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate clap;
 extern crate rand;
+#[macro_use(lazy_static)]
+extern crate lazy_static;
 mod network;
 mod api;
 mod crypto;

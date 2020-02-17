@@ -1,4 +1,5 @@
 pub mod transactionGenerator;
+pub mod snapshot;
 
 use super::mempool;
 use super::network;
