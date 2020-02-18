@@ -1,0 +1,9 @@
+This workspace stores scripts to run and monitor main nodes. 
+
+To monitor the running nodes, softwares needs to be installed.:
+
+1. install Go language with https://golang.org/doc/install
+2. install a stable release of round-robin database (rrd) with https://oss.oetiker.ch/rrdtool/download.en.html
+3. cd telematics && go build
+4. configure nodes to monitor by modifying nodes.txt, where each line stores information for each node: name,ip,port
+5. run ./telematics
