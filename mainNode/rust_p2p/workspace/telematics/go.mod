@@ -1,4 +1,4 @@
-module github.com/bx3/scalechain/telematris
+module github.com/bx3/scalechain/telematics
 
 go 1.13
 
