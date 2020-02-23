@@ -1,5 +1,8 @@
 #[macro_use]
 extern crate clap;
+ #[macro_use]
+extern crate log;
+extern crate env_logger;
 extern crate rand;
 #[macro_use(lazy_static)]
 extern crate lazy_static;
@@ -13,6 +16,7 @@ mod contract;
 mod experiment;
 mod mempool;
 
+
 use std::{thread, time};
 use std::sync::mpsc::{self};
 use mio_extras::channel::{self};
@@ -22,6 +26,8 @@ use std::io::{BufRead, BufReader};
 use network::message::{ServerSignal, ConnectResult, ConnectHandle};
 use network::message::{Message};
 use network::performer::{Performer};
+use network::peer::{PeerContext};
+use network::scheduler::{Scheduler};
 use db::blockDb::{BlockDb};
 use blockchain::blockchain::{BlockChain};
 use mempool::mempool::{Mempool};
@@ -33,6 +39,7 @@ use primitive::block::{Transaction};
 use rand::Rng;
 use std::net::{SocketAddr};
 use crossbeam::channel as cbchannel;
+use log::{info, warn, error, debug};
 
 use contract::interface::{Handle, Answer};
 use contract::interface::Message as ContractMessage;
@@ -40,7 +47,9 @@ use contract::interface::Response as ContractResponse;
 
 
 
+
 fn main() {
+    env_logger::init();
     let matches = clap_app!(myapp =>
         (version: "0.0")
         (author: "Bowen Xue.<bx3@uw.edu>")
@@ -85,6 +94,7 @@ fn main() {
         contract_handle_receiver,
         mempool.clone(),
         blockchain.clone(),
+        block_db.clone(),
     ); 
 
 
@@ -115,7 +125,8 @@ fn main() {
         tx_control_sender, 
         mempool.clone(), 
         contract_handle_sender.clone(), 
-        blockchain.clone()
+        blockchain.clone(),
+        block_db.clone(),
     );
 
     // connect to peer
@@ -138,21 +149,21 @@ fn main() {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            println!("{} send ServeSignal::ServerConnect to {:?}. attempt {}", listen_socket, neighbor, attempt);
+            info!("{} send ServeSignal::ServerConnect to {:?}. attempt {}", listen_socket, neighbor, attempt);
             server_control_sender.send(ServerSignal::ServerConnect(connect_handle.clone()));           
             match receiver.recv() {
                 Ok(result) => {
                     match result {
                         ConnectResult::Success => {
-                            println!("connect success");
+                            info!("connect success");
                             break;
                         },
                         ConnectResult::Fail => {
-                            println!("ConnectResult::Fail {:?}", neighbor);
+                            info!("ConnectResult::Fail {:?}", neighbor);
                         },
                     } 
                 },
-                Err(e) => println!("receive error {:?}", e),
+                Err(e) => info!("receive error {:?}", e),
             }
             let sleep_time = time::Duration::from_millis(500);
             thread::sleep(sleep_time);
@@ -210,7 +221,7 @@ pub fn sync_chain(contract_channel: cbchannel::Sender<Handle>) -> usize {
             }
         },
         Err(e) => {
-            panic!("sync chain failure error");
+            panic!("main contract channel broke");
         },
     };   
     chain_len

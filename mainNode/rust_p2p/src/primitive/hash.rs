@@ -42,6 +42,15 @@ impl H256 {
     }
 }
 
+impl fmt::Display for H256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte_idx in 0..32 {
+            write!(f, "{:>02x}", &self.0[byte_idx])?;
+        }
+        Ok(())
+    }
+}
+
 impl Default for H256 {
     fn default() -> H256 {
         H256([0 as u8; 32]) 

@@ -1,3 +1,4 @@
+extern crate log;
 use mio::{Events, Poll, Ready, PollOpt, Token};
 use mio::tcp::{TcpListener, TcpStream};
 use std::net::{SocketAddr};
@@ -9,7 +10,8 @@ use super::MSG_BUF_SIZE;
 use super::message::{Message, ServerSignal, ConnectResult, ConnectHandle, TaskRequest};
 use mio_extras::channel::{self, Receiver};
 use crossbeam::channel as cbchannel;
-use log::{info};
+
+use log::{info, warn};
 
 // refer to https://sergey-melnychuk.github.io/2019/08/01/rust-mio-tcp-server/ 
 // for context
@@ -53,7 +55,7 @@ impl Context {
         let _handler = thread::spawn(move || {
             self.listen(); 
         });
-        println!("listener started");
+        info!("listener started");
     }
 
     // register tcp in the event loop
@@ -87,7 +89,7 @@ impl Context {
         ).unwrap();
 
         self.response_receiver.insert(local_token, event_rx);
-        println!("{} registered peer {}, peer token {}, local token {}", self.local_addr, peer_addr, network_token.0, local_token.0); 
+        info!("{} registered peer {}, peer token {}, local token {}", self.local_addr, peer_addr, network_token.0, local_token.0); 
 
         Ok(network_token)
     }
@@ -104,7 +106,7 @@ impl Context {
             }
         };
         let stream = TcpStream::from_stream(tcp_stream)?;
-        println!("{} connected to {} : {}", self.local_addr, addr, stream.local_addr().unwrap());
+        info!("{} connected to {} : {}", self.local_addr, addr, stream.local_addr().unwrap());
         let network_token = self.register_peer(stream, PeerDirection::Outgoing).unwrap();
         let mut peer = self.peers.get_mut(&network_token).unwrap();
         connect_handle.result_sender.send(ConnectResult::Success).expect("send connection result back");
@@ -137,11 +139,10 @@ impl Context {
                         loop {
                             match listener.accept() { 
                                 Ok((socket, socket_addr)) => {
-                                    println!("tcp registered {} due to listen", socket_addr);
+                                    info!("tcp registered {} due to listen", socket_addr);
                                     self.register_peer(socket, PeerDirection::Incoming).expect("cannot register peer");
                                 },
                                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                    //println!("Tcp listener would block");
                                     break; 
                                 },
                                 e => panic!("err={:?}", e),
@@ -167,11 +168,11 @@ impl Context {
                                                 }
                                             }
                                         },
-                                        _ => println!("ServerSignal not implemented yet"),
+                                        _ => warn!("ServerSignal not implemented yet"),
                                     }
                                     break;
                                 },
-                                e => println!("api receiver Err {:?}", e),
+                                e => warn!("api receiver Err {:?}", e),
                             }
                         }
                     },
@@ -193,23 +194,19 @@ impl Context {
                                                 peer: Some(peer.peer_handle.clone()), 
                                                 msg: peer.request.clone()
                                             };
-                                            //println!("send task to performer");
                                             self.task_sender.send(performer_task).expect("send request to performer");
                                         },
                                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                                             break; 
                                         },
                                         e => {
-                                            //self.peers.remove(&token).unwrap();   
-                                            println!("Connect fail. could not connect to {:?}", peer.addr);
+                                            warn!("Connect fail. could not connect to {:?}", peer.addr);
                                             match peer.connect_handle {
                                                 Some(ref handler) => {
-                                                    println!("before handler send");
                                                     //handler.result_sender.send(ConnectResult::Fail).expect("result sender fail");
-                                                    println!("after handler send");
                                                 }
                                                 _ => {
-                                                    println!("cannot find handler");
+                                                    warn!("cannot find handler");
                                                 },
                                             }
                                         },
@@ -219,7 +216,6 @@ impl Context {
                             LOCAL_TOKEN => {
                                 let peer_token = Token(token.0 - 1);
                                 let peer = self.peers.get(&peer_token).expect("cannot get peer with local token"); 
-                                //println!("before reregister write");
                                 self.poll.reregister(
                                         &peer.stream,
                                         peer_token,
@@ -231,7 +227,6 @@ impl Context {
                         }
                     },
                     token if event.readiness().is_writable() => {
-                        //println!("event is writable");
                         let peer = self.peers.get_mut(&token).expect("writable cannot get peer"); 
                         let peer_token = Token(token.0 + 1);
                         let receiver = self.response_receiver.get(&peer_token).expect("response_receiver empty");
@@ -242,7 +237,6 @@ impl Context {
                                 Ok(msg) => {
                                     let mut peer_stream = &peer.stream;
                                     let encoded_msg = bincode::serialize(&msg).expect("unable to encode msg");
-                                    //println!("write message of size {}, {:?}", encoded_msg.len(), encoded_msg);
                                     //let decoded_msg: Message = bincode::deserialize(&encoded_msg).expect("unable to encode msg");
                                     //println!("{:?}", decoded_msg);
                                     match peer_stream.write_all(encoded_msg.as_slice()) {
@@ -258,7 +252,7 @@ impl Context {
                                     ).expect("unable to reregister");  
                                     break;
                                 },
-                                Err(e) => println!("write try receive fails "),
+                                Err(e) => warn!("write try receive fails "),
                             }
                         }
                         

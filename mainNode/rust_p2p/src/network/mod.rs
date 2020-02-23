@@ -4,6 +4,7 @@ pub mod server;
 pub mod peer;
 pub mod message;
 pub mod performer;
+pub mod scheduler;
 
 use super::primitive;
 use super::db::{blockDb, utxoDb};

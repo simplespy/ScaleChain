@@ -5,9 +5,11 @@ use crypto::sha3::Sha3;
 use crypto::digest::Digest;
 use secp256k1::{Secp256k1, SecretKey};
 use crate::primitive::block::Block;
+use bincode::{deserialize};
 
 pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> Vec<u8> {
     let command = format!("ethabi encode function --lenient ./abi.json sendBlock -p {} -p {} -p {}", block, signature, new_blk_id);
+    println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -100,4 +102,22 @@ pub fn _block_to_str(block: Block) -> String {
     let block_vec: Vec<u8> = block.clone().ser();
     let block_ref: &[u8] = block_vec.as_ref();
     hex::encode(block_ref)
+}
+
+pub fn _str_to_block(block_str: String) -> Block   {
+    let bytes = match hex::decode(&block_str) {
+        Ok(b) => b,
+        Err(e) => {
+            println!("unable to decode block_ser");
+            let mut block = Block::default();
+            return block;
+        }
+    };
+    match bincode::deserialize(&bytes[..]) {
+        Ok(block) => block,
+        Err(e) => {
+            println!("unable to deserialize block");
+            Block::default()
+        },
+    }
 }

@@ -22,6 +22,25 @@ impl BlockChain {
         self.blockchain.push(contract_state.clone());
     }
 
+    // TODO redundent to insert, remove insert later
+    pub fn append(&mut self, eth_state: &ContractState) {
+        self.blockchain.push(eth_state.clone());
+    }
+
+    pub fn update(&mut self, eth_state: &ContractState) {
+        let curr_state = self.blockchain.last();
+        let curr_state = curr_state.expect("blockchain:update is empty");
+        if eth_state.block_id == curr_state.block_id + 1 {
+            self.blockchain.push(eth_state.clone());
+        } else if eth_state.block_id > curr_state.block_id + 1 {
+            // local chain is missing blocks
+        } else if eth_state.block_id == curr_state.block_id {
+            println!("local chain already synced");
+        } else {
+            panic!("local chain screw up, it is greater than eth chain");
+        }
+    }
+
     // block_id itself is changed
     pub fn revise(&mut self, block_id: usize, states: Vec<ContractState>) {
 

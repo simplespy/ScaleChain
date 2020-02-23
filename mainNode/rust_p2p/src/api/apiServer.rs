@@ -3,6 +3,7 @@ extern crate tiny_http;
 use super::{TxGenSignal};
 use super::mempool::mempool::{Mempool};
 use super::blockchain::blockchain::BlockChain;
+use super::db::blockDb::BlockDb;
 use super::contract::interface::{Message, Handle, Answer};
 use super::contract::interface::Response as ContractResponse;
 use crossbeam::channel::{self, Sender};
@@ -27,6 +28,7 @@ pub struct RequestContext {
     tx_control: Sender<TxGenSignal>,
     mempool: Arc<Mutex<Mempool>>,
     chain: Arc<Mutex<BlockChain>>,
+    block_db: Arc<Mutex<BlockDb>>,
     contract_channel: Sender<Handle>,
 }
 
@@ -57,6 +59,7 @@ impl ApiServer {
                  mempool: Arc<Mutex<Mempool>>,
                  contract_channel: Sender<Handle>,
                  chain: Arc<Mutex<BlockChain>>,
+                 block_db: Arc<Mutex<BlockDb>>,
     ) {
         let server = Server::http(&socket).unwrap();
         let _handler = thread::spawn(move || {
@@ -65,6 +68,7 @@ impl ApiServer {
                     tx_control: tx_control.clone(),
                     mempool: mempool.clone(),
                     chain: chain.clone(),
+                    block_db: block_db.clone(),
                     contract_channel: contract_channel.clone(),
                 };
                 // new thread per request
@@ -112,11 +116,18 @@ impl ApiServer {
                         },
                         "/blockchain/get-curr-state" => {
                             println!("before /blockchain/get-curr-state lock" );
-                            let mut chain = rc.chain.lock().expect("api get-curr-state");
+                            let chain = rc.chain.lock().expect("api get-curr-state");
                             println!("after /blockchain/get-curr-state lock" );
-                            let state = chain.get_latest_state();
+                            let state = chain.get_latest_state().expect("/blockchain/get-curr-state empty");
                             drop(chain);
-                            respond_result!(request, true, format!("{:?}", state));
+                            respond_result!(request, true, format!("{:?}, {}", state.block_id, state.curr_hash.to_string()));
+                            //respond_result!(request, true, format!("{:?}", state));
+                        },
+                        "/block-db/get-num-blocks" => {
+                            let block_db = rc.block_db.lock().expect("api gets block db");
+                            let num_blocks = block_db.get_num_blocks();
+                            drop(block_db);
+                            respond_result!(request, true, format!("{:?}", num_blocks));
                         },
                         "/mempool/change-size" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
@@ -255,7 +266,7 @@ impl ApiServer {
                                     return;
                                 },
                             };
-                            respond_result!(request, true, format!("{:?}", curr_state));
+                            respond_result!(request, true, format!("{:?}, {:?}", curr_state.block_id, curr_state.curr_hash));
                         },
                         "/contract/get-main-nodes" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
@@ -310,7 +321,7 @@ impl ApiServer {
                         "/contract/get-all" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::GetAll(([0u8; 32], 0, 9999999)),
+                                message: Message::GetAll(([0u8; 32], 0, 0)),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);

@@ -16,7 +16,22 @@ impl BlockDb {
     
     pub fn insert(&mut self, block: &Block) {
         let hash = block.header.hash;
-        self.block_db.insert(hash, block.clone()); 
+        let old_value = self.block_db.insert(hash.clone(), block.clone()); 
+        match old_value {
+            Some(v) => println!("key {:?}, v {:?}, new {:?}", hash, v, block),
+            None => (),
+        }
+    }
+
+    pub fn replace(&mut self, blocks: Vec<Block>) {
+        self.block_db.clear();
+        for block in blocks {
+            self.insert(&block);
+        }
+    }
+
+    pub fn get_num_blocks(&self) -> usize {
+        self.block_db.len()
     }
 
     pub fn get_block(&self, block_hash: H256) -> Option<Block> {

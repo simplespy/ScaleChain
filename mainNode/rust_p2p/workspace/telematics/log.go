@@ -105,6 +105,7 @@ func log(interval, duration uint, nodesFile, dataDir string) {
 				}
 				csum, cavg := Snapshot{}, Snapshot{}
 				psum, pavg := Snapshot{}, Snapshot{}
+				fmt.Println("curr:", curr)
 
 				sum_over_nodes(&curr, &csum)
 				sum_over_nodes(&prev, &psum)

@@ -21,7 +21,7 @@ impl ContractState {
 
 
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Default, PartialEq, Eq)]
-pub struct MainNodeBlock {
+pub struct EthBlkTransaction {
      pub contract_state: ContractState,
      pub block: Block,
 }

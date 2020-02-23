@@ -1,5 +1,5 @@
 use crossbeam::channel::{Sender};
-use super::primitive::block::{ContractState, Block};
+use super::primitive::block::{EthBlkTransaction, ContractState, Block};
 use web3::types::{Address, H256, TransactionReceipt};
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ pub enum Response {
     AddMainNode,
     MainNodesList(Vec<Address>),
     TxReceipt(TransactionReceipt),
-    GetAll(Vec<ContractState>),
+    GetAll(Vec<EthBlkTransaction>),
     SyncChain(usize),
 }
 #[derive(Clone)]
