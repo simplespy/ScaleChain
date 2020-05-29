@@ -3,6 +3,7 @@ use mio_extras::channel::{self, Sender};
 use std::sync::mpsc::{self};
 use super::primitive::block::{Block, Transaction, EthBlkTransaction};
 use super::scheduler::Token;
+use std::net::{SocketAddr};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
@@ -11,7 +12,12 @@ pub enum Message {
     SyncBlock(EthBlkTransaction),
     SendTransaction(Transaction),
     PassToken(Token),
+    ScaleProposeBlock(Block),
+    ScaleReqChunks,
+    ScaleGetChunks,
+    ScaleGetAllChunks,
 }
+
 
 #[derive(Debug, Clone)]
 pub struct ConnectHandle {
@@ -26,6 +32,7 @@ pub enum ServerSignal {
     ServerStop,
     ServerStart,
     ServerBroadcast(Message),
+    ServerUnicast((SocketAddr, Message)),
 }
 
 #[derive(Clone)]

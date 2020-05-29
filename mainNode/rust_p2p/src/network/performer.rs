@@ -5,6 +5,7 @@ use std::thread;
 use super::blockDb::{BlockDb};
 use super::blockchain::blockchain::{BlockChain};
 use super::mempool::mempool::{Mempool};
+use super::scheduler::{Scheduler, Token};
 use super::contract::contract::{Contract};
 use super::contract::interface::Message as ContractMessage;
 use super::contract::interface::Response as ContractResponse;
@@ -27,6 +28,7 @@ pub struct Performer {
     chain: Arc<Mutex<BlockChain>>, 
     block_db: Arc<Mutex<BlockDb>>,
     mempool: Arc<Mutex<Mempool>>,
+    scheduler_handler: Sender<Option<Token>>,
     contract_handler: Sender<Handle>,
 }
 
@@ -36,6 +38,7 @@ impl Performer {
         blockchain: Arc<Mutex<BlockChain>>,
         block_db: Arc<Mutex<BlockDb>>,
         mempool: Arc<Mutex<Mempool>>,
+        scheduler_handler: Sender<Option<Token>>,
         contract_handler: Sender<Handle>,
     ) -> Performer {
         Performer {
@@ -44,6 +47,7 @@ impl Performer {
             block_db: block_db,
             mempool: mempool,
             contract_handler: contract_handler,
+            scheduler_handler: scheduler_handler,
         } 
     }
 
@@ -199,7 +203,7 @@ impl Performer {
         drop(chain);
     }
 
-    fn perform(&self) {
+    fn perform(&mut self) {
         loop {
             let task = self.task_source.recv().unwrap();
             match task.msg {
@@ -221,8 +225,23 @@ impl Performer {
                     drop(mempool);
                 },
                 Message::PassToken(token) => {
+                    // call scheduler
+                    info!("receive token");
+                    self.scheduler_handler.send(Some(token));
+                },
+                // temporary heck, need to move to scale-network
+                Message::ScaleProposeBlock(Block) => {
+                    println!("receive ScaleProposeBlock");
+                },
+                Message::ScaleReqChunks => {
 
-                }
+                },
+                Message::ScaleGetChunks => {
+
+                },
+                Message::ScaleGetAllChunks => {
+
+                },
             }
         } 
     }

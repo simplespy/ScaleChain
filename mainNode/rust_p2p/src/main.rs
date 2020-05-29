@@ -17,6 +17,7 @@ mod experiment;
 mod mempool;
 
 
+
 use std::{thread, time};
 use std::sync::mpsc::{self};
 use mio_extras::channel::{self};
@@ -27,7 +28,7 @@ use network::message::{ServerSignal, ConnectResult, ConnectHandle};
 use network::message::{Message};
 use network::performer::{Performer};
 use network::peer::{PeerContext};
-use network::scheduler::{Scheduler};
+use mempool::scheduler::{Scheduler, Token};
 use db::blockDb::{BlockDb};
 use blockchain::blockchain::{BlockChain};
 use mempool::mempool::{Mempool};
@@ -59,15 +60,28 @@ fn main() {
         (@arg port: -p --port  +takes_value "Sets port to listen")
         (@arg account: -d --account  +takes_value "Sets account address")
         (@arg api_port: -a --api_port  +takes_value "Sets port for api")
+        (@arg has_token: -t --has_token  +takes_value "Sets init token")
     )
     .get_matches();
 
     let listen_port: String = matches.value_of("port").expect("missing port").to_string();
     let listen_ip: String = matches.value_of("ip").expect("missing ip").to_string();
-    let listen_socket: SocketAddr = (listen_ip + ":" + &listen_port).parse().unwrap();
+    let listen_socket: SocketAddr = (listen_ip.clone() + ":" + &listen_port).parse().unwrap();
     let api_port: String = matches.value_of("api_port").expect("missing api port").to_string();
     let neighbor_path = matches.value_of("neighbor").expect("missing neighbor file");
     let account_path = matches.value_of("account").expect("missing account file");
+    let has_token = matches.value_of("has_token").expect("missing token indicator");
+
+
+    // connect to peer
+    let f = File::open(neighbor_path).expect("Unable to open file");
+    let f = BufReader::new(f);
+
+    let mut neighbors: Vec<String> = vec![];
+    for line in f.lines() {
+        let line = line.expect("Unable to read line");
+        neighbors.push(line.to_string());
+    }
 
     // get accounts
     let file = File::open(account_path).unwrap();
@@ -86,7 +100,11 @@ fn main() {
     server.start();
 
     let (contract_handle_sender, contract_handle_receiver) = cbchannel::unbounded();
-    let mempool = Arc::new(Mutex::new(Mempool::new(contract_handle_sender.clone())));
+    let (schedule_handle_sender, schedule_handle_receiver) = cbchannel::unbounded();
+    let mempool = Arc::new(Mutex::new(Mempool::new(
+                contract_handle_sender.clone(),
+                schedule_handle_sender.clone()
+                )));
     let contract = Contract::new(
         account, 
         task_sender.clone(),
@@ -95,11 +113,30 @@ fn main() {
         mempool.clone(),
         blockchain.clone(),
         block_db.clone(),
-    ); 
+    );
 
+    let mut token: Option<Token>;
+    if has_token == "0" {
+        token = None;
+    } else {
+        let mut tok = Token {
+            version: 0,
+            ring_size: 1,
+            node_list: vec![listen_socket.clone()],
+        };
+        for neighbor in neighbors.clone().iter() {
+            info!("token len increment 1");
+            tok.ring_size += 1;
+            let dest: SocketAddr = neighbor.parse().unwrap();
+            tok.node_list.push(dest);
+        }
+        token = Some(tok);
+    }
+    let scheduler = Scheduler::new(listen_socket.clone(), token, mempool.clone(), server_control_sender.clone(), schedule_handle_receiver.clone());
+    scheduler.start();
 
     contract.start();
-    sync_chain(contract_handle_sender.clone());
+    //sync_chain(contract_handle_sender.clone());
 
     // create main actors
     let mut performer = Performer::new(
@@ -107,14 +144,11 @@ fn main() {
         blockchain.clone(), 
         block_db.clone(),
         mempool.clone(),
+        schedule_handle_sender.clone(),
         contract_handle_sender.clone(),
+
     );
     performer.start();
-
-
-
-    
-
 
 
     let (tx_gen, tx_control_sender) = TransactionGenerator::new(mempool.clone());
@@ -129,15 +163,6 @@ fn main() {
         block_db.clone(),
     );
 
-    // connect to peer
-    let f = File::open(neighbor_path).expect("Unable to open file");
-    let f = BufReader::new(f);
-
-    let mut neighbors: Vec<String> = vec![];
-    for line in f.lines() {
-        let line = line.expect("Unable to read line");
-        neighbors.push(line.to_string());
-    }
 
     let mut num_connected = 0;
     for neighbor in neighbors.iter() {
@@ -169,6 +194,9 @@ fn main() {
             thread::sleep(sleep_time);
         }
     }
+
+
+    //server_control_sender.send(ServerSignal::ServerConnect(connect_handle.clone()));
    
 
     /*

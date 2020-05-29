@@ -168,6 +168,19 @@ impl Context {
                                                 }
                                             }
                                         },
+                                        ServerSignal::ServerUnicast((socket, network_message)) => {
+                                            for (token, peer) in self.peers.iter() { 
+                                                if peer.addr == socket {
+                                                    match peer.direction {
+                                                        PeerDirection::Incoming => (),
+                                                        PeerDirection::Outgoing => {
+                                                            //info!("server unicast to {:?}", peer.addr);
+                                                            peer.send(network_message.clone()); 
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        },
                                         _ => warn!("ServerSignal not implemented yet"),
                                     }
                                     break;

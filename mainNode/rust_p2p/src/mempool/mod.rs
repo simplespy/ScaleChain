@@ -4,6 +4,7 @@ use super::blockchain::blockchain;
 use super::contract;
 
 pub mod mempool;
+pub mod scheduler;
 
 
 

@@ -9,22 +9,26 @@ use super::contract::interface::{Message, Handle, Answer};
 use web3::types::{TransactionReceipt};
 use super::contract::interface::Response as ContractResponse;
 use crossbeam::channel::{self, Sender};
+use super::scheduler::{Token};
 
 pub struct Mempool {
     transactions: VecDeque<Transaction>,
     block_size: usize,
     contract_handler: Sender<Handle>,
+    schedule_handler: Sender<Option<Token>>,
     returned_blocks: VecDeque<Block>,
 }
 
 impl Mempool {
     pub fn new(
-        contract_handler: Sender<Handle>
+        contract_handler: Sender<Handle>,
+        schedule_handler: Sender<Option<Token>>
     ) -> Mempool {
         Mempool {
             transactions: VecDeque::new(), 
             block_size: 1,
             contract_handler: contract_handler,
+            schedule_handler: schedule_handler,
             returned_blocks: VecDeque::new(),
         } 
     }
@@ -45,33 +49,38 @@ impl Mempool {
         self.returned_blocks.push_back(block);
     }
 
-    fn prepare_block(&mut self) -> Block {
+    pub fn prepare_block(&mut self) -> Option<Block> {
+        if self.transactions.len() == 0 {
+            return None;
+        }
+
         let mut transactions: Vec<Transaction> = Vec::new();
-        assert!(self.transactions.len() >= self.block_size);
+        //assert!(self.transactions.len() >= self.block_size);
         for _ in 0..self.block_size {
             let tx = self.transactions.pop_front().expect("mempool prepare block");
             transactions.push(tx);
         }
 
-        Block {
+        return Some(Block {
             header: Header::default(),
             transactions: transactions,
-        }
+        });
 
     }
 
+    // desolete mempool should be called by scheduler
     pub fn send_block(&mut self) {
         // resend those blocks
         while self.returned_blocks.len() != 0 {
             match self.returned_blocks.pop_front() {
                 Some(block) => {
-                    self._send_block(block);
+                    //self._send_block(block);
                 },
                 None => (),
             }
         }
         
-        let mut block = self.prepare_block();
+        let mut block = self.prepare_block().expect("send block");
         block.update_root();
         block.update_hash();
 
@@ -91,14 +100,15 @@ impl Mempool {
     pub fn insert(&mut self, transaction: Transaction) {
         self.transactions.push_back(transaction);
         if self.transactions.len() >= self.block_size {
-            self.send_block();
+            //self.send_block();
+            self.schedule_handler.send(None);
         }
     }
 
     pub fn estimate_gas(&mut self, transaction: Transaction) {
         self.transactions.push_back(transaction);
         if self.transactions.len() >= self.block_size {
-            let mut block = self.prepare_block();
+            let mut block = self.prepare_block().expect("send block");
             block.update_root();
             block.update_hash();
             let message = Message::EstimateGas(block);
