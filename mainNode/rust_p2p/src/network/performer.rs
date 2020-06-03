@@ -241,7 +241,9 @@ impl Performer {
                     info!("{:?} receive token", self.addr);
                     self.scheduler_handler.send(Some(token));
                 },
+
                 // temporary heck, need to move to scale-network
+                // CMT worker thread
                 Message::ScaleProposeBlock(Block) => {
                     if self.is_scale_node {
                         info!("{:?} receive ScaleProposeBlock", self.addr);
@@ -270,8 +272,8 @@ impl Performer {
                                     Err(e) => info!("proposer error"),
                                 }
                                 if num_chunk > 0 {
-                                    // send to ethereum 
                                     info!("{:?} is ready to aggregate sign", local_addr);
+                                    // vote
                                     let response_msg = Message::MySign(local_addr.to_string());
                                     peer_handle.response_sender.send(response_msg);
                                     
@@ -282,6 +284,8 @@ impl Performer {
 
                                 //commit to eth after receiving all message
                             }
+                            // after time out
+                            // vote and communicate signature depending on number of recv chunks
                             
                         });  
 

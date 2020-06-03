@@ -14,7 +14,7 @@ pub enum Message {
     SendTransaction(Transaction),
     PassToken(Token),
     ScaleProposeBlock(Block), //BlockHeader //sender is client
-    ScaleReqChunks, // sender is scalenode
+    ScaleReqChunks, //(id), // sender is scalenode
     ScaleReqChunksReply,
     MySign(String),
     ScaleGetAllChunks,
