@@ -4,6 +4,7 @@ use std::sync::mpsc::{self};
 use super::primitive::block::{Block, Transaction, EthBlkTransaction};
 use super::scheduler::Token;
 use std::net::{SocketAddr};
+use chain::{BlockHeader}; 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
@@ -12,9 +13,10 @@ pub enum Message {
     SyncBlock(EthBlkTransaction),
     SendTransaction(Transaction),
     PassToken(Token),
-    ScaleProposeBlock(Block),
-    ScaleReqChunks,
-    ScaleGetChunks,
+    ScaleProposeBlock(Block), //BlockHeader //sender is client
+    ScaleReqChunks, // sender is scalenode
+    ScaleReqChunksReply,
+    MySign(String),
     ScaleGetAllChunks,
 }
 
@@ -38,6 +40,7 @@ pub enum ServerSignal {
 #[derive(Clone)]
 pub struct PeerHandle {
     pub response_sender: channel::Sender<Message>,   
+    pub addr: SocketAddr,
 }
 
 #[derive(Clone, Copy, Debug)]

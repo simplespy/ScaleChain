@@ -61,6 +61,7 @@ fn main() {
         (@arg account: -d --account  +takes_value "Sets account address")
         (@arg api_port: -a --api_port  +takes_value "Sets port for api")
         (@arg has_token: -t --has_token  +takes_value "Sets init token")
+        (@arg is_scale_node: -s --scale_node  +takes_value "Sets scalechain node")
     )
     .get_matches();
 
@@ -71,7 +72,7 @@ fn main() {
     let neighbor_path = matches.value_of("neighbor").expect("missing neighbor file");
     let account_path = matches.value_of("account").expect("missing account file");
     let has_token = matches.value_of("has_token").expect("missing token indicator");
-
+    let is_scale_node: bool = matches.value_of("is_scale_node").expect("missing scalenode") == "1";
 
     // connect to peer
     let f = File::open(neighbor_path).expect("Unable to open file");
@@ -79,8 +80,11 @@ fn main() {
 
     let mut neighbors: Vec<String> = vec![];
     for line in f.lines() {
-        let line = line.expect("Unable to read line");
-        neighbors.push(line.to_string());
+        let line = line.expect("Unable to read line").to_string();
+        if line != listen_socket.clone().to_string() {
+            println!("{:?} read neighbor {:?}", listen_socket, line);
+            neighbors.push(line.to_string());
+        }
     }
 
     // get accounts
@@ -95,7 +99,8 @@ fn main() {
     let (task_sender, task_receiver) =cbchannel::unbounded();
     let (server, server_control_sender) = network::server::Context::new(
         task_sender.clone(), 
-        listen_socket
+        listen_socket,
+        is_scale_node,
     );
     server.start();
 
@@ -119,6 +124,8 @@ fn main() {
     if has_token == "0" {
         token = None;
     } else {
+        let nt: String  = has_token.to_string();
+        let number_token = nt.parse::<usize>().unwrap();
         let mut tok = Token {
             version: 0,
             ring_size: 1,
@@ -129,6 +136,9 @@ fn main() {
             tok.ring_size += 1;
             let dest: SocketAddr = neighbor.parse().unwrap();
             tok.node_list.push(dest);
+            if tok.ring_size == number_token {
+                break;
+            }
         }
         token = Some(tok);
     }
@@ -146,7 +156,8 @@ fn main() {
         mempool.clone(),
         schedule_handle_sender.clone(),
         contract_handle_sender.clone(),
-
+        is_scale_node,
+        listen_socket.clone(),
     );
     performer.start();
 

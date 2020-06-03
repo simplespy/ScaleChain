@@ -30,12 +30,14 @@ pub struct Context {
     response_receiver: HashMap<Token, channel::Receiver<Message>>,
     api_receiver: channel::Receiver<ServerSignal>,
     local_addr: SocketAddr,
+    is_scale_node: bool,
 }
 
 impl Context {
     pub fn new(
         task_sender: cbchannel::Sender<TaskRequest>, 
         addr: SocketAddr, 
+        is_scale_node: bool,
     ) -> (Context, channel::Sender<ServerSignal>) {
         let (control_tx, control_rx) = channel::channel();
         let context = Context{
@@ -46,6 +48,7 @@ impl Context {
             response_receiver: HashMap::new(),
             api_receiver: control_rx,
             local_addr: addr,
+            is_scale_node: is_scale_node,
         };
         (context, control_tx)
     }

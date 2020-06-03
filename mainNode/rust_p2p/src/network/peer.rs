@@ -25,10 +25,11 @@ impl PeerContext {
         direction: PeerDirection,
     ) -> (PeerContext, channel::Receiver<Message>) {
         let (sender, receiver) = channel::channel();
+        let addr = stream.peer_addr().unwrap();
         let peer_context = PeerContext {
-            addr: stream.peer_addr().unwrap(),
+            addr: addr.clone(),
             stream: stream,
-            peer_handle: PeerHandle{response_sender: sender}, 
+            peer_handle: PeerHandle{response_sender: sender, addr: addr}, 
             request: Message::Ping("Default".to_string()),
             connect_handle: None,   
             is_connected: false,

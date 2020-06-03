@@ -14,6 +14,7 @@ use super::contract::interface::Error as ContractError;
 use super::primitive::block::ContractState;
 use std::sync::{Arc, Mutex};
 use crossbeam::channel::{self, Sender, Receiver};
+use std::net::{SocketAddr};
 use super::primitive::hash::{H256};
 use super::crypto::hash;
 use super::primitive::block::{Block, EthBlkTransaction};
@@ -22,6 +23,7 @@ use crypto::sha2::Sha256;
 use crypto::digest::Digest;
 
 use super::contract::utils;
+use std::collections::HashMap;
 
 pub struct Performer {
     task_source: Receiver<TaskRequest>,
@@ -30,6 +32,10 @@ pub struct Performer {
     mempool: Arc<Mutex<Mempool>>,
     scheduler_handler: Sender<Option<Token>>,
     contract_handler: Sender<Handle>,
+    is_scale_node: bool,
+    addr: SocketAddr,
+    proposer_by_addr: HashMap<SocketAddr, Sender<String> >,
+    //curr_proposer: Option<Sender<String>>,
 }
 
 impl Performer {
@@ -40,6 +46,8 @@ impl Performer {
         mempool: Arc<Mutex<Mempool>>,
         scheduler_handler: Sender<Option<Token>>,
         contract_handler: Sender<Handle>,
+        is_scale_node: bool,
+        addr: SocketAddr,
     ) -> Performer {
         Performer {
             task_source,
@@ -48,6 +56,10 @@ impl Performer {
             mempool: mempool,
             contract_handler: contract_handler,
             scheduler_handler: scheduler_handler,
+            is_scale_node: is_scale_node,
+            addr: addr,
+            proposer_by_addr: HashMap::new(),
+            //curr_proposer: None,
         } 
     }
 
@@ -226,21 +238,88 @@ impl Performer {
                 },
                 Message::PassToken(token) => {
                     // call scheduler
-                    info!("receive token");
+                    info!("{:?} receive token", self.addr);
                     self.scheduler_handler.send(Some(token));
                 },
                 // temporary heck, need to move to scale-network
                 Message::ScaleProposeBlock(Block) => {
-                    println!("receive ScaleProposeBlock");
+                    if self.is_scale_node {
+                        info!("{:?} receive ScaleProposeBlock", self.addr);
+                        let local_addr = self.addr.clone();
+                        let peer_handle = task.peer.unwrap();
+                        let proposer_addr = peer_handle.addr;
+
+                        let (tx, rx) = channel::unbounded();
+                        self.proposer_by_addr.insert(proposer_addr, tx);
+                        // this scalenode receive propose block
+                        // ask the node to send chunks
+                        //let start_time = time::
+                        // send neighbor to send chunks
+                        let response_msg = Message::ScaleReqChunks;
+                        peer_handle.response_sender.send(response_msg);
+                        // timed loop
+                        thread::spawn(move || {
+                            let mut num_chunk = 0;
+                            let mut chunk_complete = false;
+                            loop {
+                                match rx.recv() {
+                                    Ok(reply) => {
+                                        info!("receive ScaleReqChunksreply"); //say 1 chunks is sufficient
+                                        num_chunk += 1;
+                                    },
+                                    Err(e) => info!("proposer error"),
+                                }
+                                if num_chunk > 0 {
+                                    // send to ethereum 
+                                    info!("{:?} is ready to aggregate sign", local_addr);
+                                    let response_msg = Message::MySign(local_addr.to_string());
+                                    peer_handle.response_sender.send(response_msg);
+                                    
+
+                                }
+
+                                //wait for other sign + modify rx message type
+
+                                //commit to eth after receiving all message
+                            }
+                            
+                        });  
+
+                    }
+                },
+                Message::MySign(m) => {
+                    info!("{:?} receive MySign message {:?}", self.addr, m);
+                    // send to spawned thread like ScaleReqChunksReply
+
                 },
                 Message::ScaleReqChunks => {
+                    info!("{:?} receive ScaleReqChunks", self.addr);
+                    // this client needs to prepare chunks in response to 
+                    // scalenode
 
+                    // this sends chunk to the scale node
+                    let response_msg = Message::ScaleReqChunksReply;
+                    task.peer.unwrap().response_sender.send(response_msg);
                 },
-                Message::ScaleGetChunks => {
-
+                Message::ScaleReqChunksReply => {
+                    if self.is_scale_node {
+                        info!("{:?} receive ScaleReqChunksReply", self.addr);
+                        let proposer_socket = task.peer.unwrap().addr ;
+                        
+                        match &self.proposer_by_addr.get(&proposer_socket) {
+                            Some(sender) => {
+                                sender.send("Chunk ready".to_string());
+                            },
+                            None => info!("case when no proposer but receive chunk reply"),
+                        }
+                        
+                    } 
                 },
                 Message::ScaleGetAllChunks => {
+                    if self.is_scale_node {
+                        info!("{:?} receive ScaleGetAllChunks", self.addr);
 
+                    }
                 },
             }
         } 

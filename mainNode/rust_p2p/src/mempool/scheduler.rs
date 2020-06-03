@@ -96,11 +96,11 @@ impl Scheduler {
 
             // broadcast block to scalenode
             let message =  Message::ScaleProposeBlock(block);
-
             // broadcast block without using CMT
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);
 
+            // Pass token
             let sleep_time = time::Duration::from_millis(500);
             thread::sleep(sleep_time);
             if token.ring_size >= 2 {
