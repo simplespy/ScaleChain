@@ -1,0 +1,15 @@
+{
+  "name": "scalechain_v1",
+  "version": "1.0.0",
+  "description": "",
+  "main": "truffle.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+    "ethereumjs-testrpc": "^6.0.3",
+    "ganache-cli": "^6.8.2",
+    "truffle-hdwallet-provider": "^1.0.17",
+    "web3": "^1.2.5-rc.0"
+  }
+}
