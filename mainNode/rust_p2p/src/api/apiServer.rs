@@ -188,7 +188,7 @@ impl ApiServer {
                                             match response {
                                                 ContractResponse::TxReceipt(receipt) => receipt,
                                                 _ => {
-                                                    panic!("answer to GetMainNodes: invalid response type");
+                                                    panic!("answer to GetScaleNodes: invalid response type");
                                                 },
                                             }
                                         },
@@ -205,11 +205,11 @@ impl ApiServer {
                             };
                             respond_result!(request, true, format!("{:?}", receipt));
                         },
-                        "/contract/count-main-nodes" => {
+                        "/contract/count-scale-nodes" => {
                             // USE CALLBACK
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::CountMainNodes,
+                                message: Message::CountScaleNodes,
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
@@ -218,9 +218,9 @@ impl ApiServer {
                                     match answer {
                                         Answer::Success(response) => {
                                             match response {
-                                                ContractResponse::CountMainNode(num_main_node) => num_main_node,
+                                                ContractResponse::CountScaleNode(num_scale_node) => num_scale_node,
                                                 _ => {
-                                                    panic!("answer to NumMainNode: invalid response type");
+                                                    panic!("answer to NumScaleNode: invalid response type");
                                                 },
                                             }
                                         },
@@ -268,21 +268,21 @@ impl ApiServer {
                             };
                             respond_result!(request, true, format!("{:?}, {:?}", curr_state.block_id, curr_state.curr_hash));
                         },
-                        "/contract/get-main-nodes" => {
+                        "/contract/get-scale-nodes" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::GetMainNodes,
+                                message: Message::GetScaleNodes,
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
-                            let main_nodes = match answer_rx.recv() {
+                            let scale_nodes = match answer_rx.recv() {
                                 Ok(answer) => {
                                     match answer {
                                         Answer::Success(response) => {
                                             match response {
-                                                ContractResponse::MainNodesList(main_nodes) => main_nodes,
+                                                ContractResponse::ScaleNodesList(scale_nodes) => scale_nodes,
                                                 _ => {
-                                                    panic!("answer to GetMainNodes: invalid response type");
+                                                    panic!("answer to GetScaleNodes: invalid response type");
                                                 },
                                             }
                                         },
@@ -297,9 +297,9 @@ impl ApiServer {
                                     return;
                                 },
                             };
-                            respond_result!(request, true, format!("{:?}", main_nodes));
+                            respond_result!(request, true, format!("{:?}", scale_nodes));
                         },
-                        "/contract/add-main-node" => {
+                        /*"/contract/add-scale-node" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
                             let address = match pairs.get("address") {
                                 Some(s) => s,
@@ -311,13 +311,13 @@ impl ApiServer {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let address = address.parse().unwrap();
                             let handle = Handle {
-                                message: Message::AddMainNode(address),
+                                message: Message::AddScaleNode(address),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
-                            let reply = Response::from_string(format!("Add mainNode {}", address));
+                            let reply = Response::from_string(format!("Add scaleNode {}", address));
                             request.respond(reply);
-                        },
+                        },*/
                         "/contract/get-all" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
@@ -340,7 +340,7 @@ impl ApiServer {
                                             match response {
                                                 ContractResponse::SyncChain(chain_len) => chain_len,
                                                 _ => {
-                                                    panic!("answer to GetMainNodes: invalid response type");
+                                                    panic!("answer to GetScaleNodes: invalid response type");
                                                 },
                                             }
                                         },

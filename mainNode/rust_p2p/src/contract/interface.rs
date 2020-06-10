@@ -1,6 +1,6 @@
 use crossbeam::channel::{Sender};
 use super::primitive::block::{EthBlkTransaction, ContractState, Block};
-use web3::types::{Address, H256, TransactionReceipt};
+use web3::types::{Address, H256, TransactionReceipt, U256};
 
 #[derive(Clone)]
 pub struct Handle {
@@ -11,9 +11,9 @@ pub struct Handle {
 pub enum Response {
     SendBlock,
     GetCurrState(ContractState),
-    CountMainNode(usize), 
-    AddMainNode,
-    MainNodesList(Vec<Address>),
+    CountScaleNode(usize), 
+    AddScaleNode,
+    ScaleNodesList(Vec<Address>),
     TxReceipt(TransactionReceipt),
     GetAll(Vec<EthBlkTransaction>),
     SyncChain(usize),
@@ -27,13 +27,14 @@ pub enum Answer {
 pub enum Message {
     SendBlock(Block),
     GetCurrState,
-    CountMainNodes,
-    AddMainNode(Address),
-    GetMainNodes,
+    CountScaleNodes,
+    AddScaleNode(Address, String, U256, U256, U256, U256),
+    GetScaleNodes,
     GetTxReceipt(H256),
     GetAll(([u8;32], usize, usize)), //inithash, start, end
     SyncChain,
     EstimateGas(Block),
+    SubmitVote(String, U256, U256, U256),
 }
 
 pub enum Error {

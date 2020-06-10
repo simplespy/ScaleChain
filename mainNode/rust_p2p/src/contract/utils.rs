@@ -6,6 +6,38 @@ use crypto::digest::Digest;
 use secp256k1::{Secp256k1, SecretKey};
 use crate::primitive::block::Block;
 use bincode::{deserialize};
+use serde::{Serialize, Deserialize};
+
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BLSKeyStr{
+    pub sk: String,
+    pub pkx1: String,
+    pub pkx2: String,
+    pub pky1: String,
+    pub pky2: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BLSKey{
+    pub sk: U256,
+    pub pkx1: U256,
+    pub pkx2: U256,
+    pub pky1: U256,
+    pub pky2: U256,
+}
+
+impl BLSKey {
+    pub fn new(key: BLSKeyStr) -> Self {
+        BLSKey {
+            sk :U256::from_dec_str(key.sk.as_ref()).unwrap(),
+            pkx1 :U256::from_dec_str(key.pkx1.as_ref()).unwrap(),
+            pkx2 :U256::from_dec_str(key.pkx2.as_ref()).unwrap(),
+            pky1 :U256::from_dec_str(key.pky1.as_ref()).unwrap(),
+            pky2 :U256::from_dec_str(key.pky2.as_ref()).unwrap(),
+        }
+    }
+}
 
 pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> Vec<u8> {
     let command = format!("ethabi encode function --lenient ./abi.json sendBlock -p {} -p {} -p {}", block, signature, new_blk_id);
@@ -18,8 +50,23 @@ pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> 
     return function_abi;
 }
 
-pub fn _encode_addMainNode(address: Address) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json addMainNode -p {}", address);
+pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U256, y1: U256, y2: U256) -> Vec<u8> {
+    let addr = hex::encode(address.as_bytes());
+    //let addr = addr.replace("0x", "");
+    let command = format!("ethabi encode function --lenient ./abi.json addScaleNode -p {} -p {} -p {} -p {} -p {} -p {}", addr, ip_addr, x1, x2, y1, y2);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+    println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
+
+pub fn _encode_submitVote(block: String, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
+    let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {}", block, sigx, sigy, bitset);
+    println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();

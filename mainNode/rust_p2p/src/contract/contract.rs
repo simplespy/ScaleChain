@@ -52,6 +52,7 @@ pub struct Account {
     contract_address: Address,
     address: Address,
     private_key: String,
+    ip_address: String,
 }
 
 impl Contract {
@@ -97,17 +98,20 @@ impl Contract {
                                 Message::SendBlock(block) => {
                                     self.send_block(block);
                                 },
-                                Message::AddMainNode(address) => {
-                                    self.add_main_node(address);
+                                Message::SubmitVote(header, sigx, sigy, bitset) => {
+                                    self.submit_vote(header, sigx, sigy, bitset);
                                 },
-                                Message::CountMainNodes => {
-                                    self.count_main_nodes(handle);
+                                Message::AddScaleNode(address, ip_addr, x1, x2, y1, y2) => {
+                                    self.add_scale_node(address, ip_addr, x1, x2, y1, y2);
+                                },
+                                Message::CountScaleNodes => {
+                                    self.count_scale_nodes(handle);
                                 },
                                 Message::GetCurrState => {
                                     self.get_curr_state(handle); 
                                 },
-                                Message::GetMainNodes => {
-                                    self.get_main_nodes(handle);
+                                Message::GetScaleNodes => {
+                                    self.get_scale_nodes(handle);
                                 },
                                 Message::GetTxReceipt(tx_hash) => {
                                     self.get_tx_receipt(tx_hash);
@@ -147,50 +151,82 @@ impl Contract {
         unimplemented!()
     }
 
-    pub fn get_main_nodes(&self, handle: Handle) {
-        let n = self._count_main_nodes();
+    pub fn get_scale_nodes(&self, handle: Handle) {
+        let n = self._count_scale_nodes();
         let mut nodes = Vec::new();
         for i in {0..n} {
-            let address = self._get_main_node(i);
+            let address = self._get_scale_node(i);
             nodes.push(address);
         }
-        info!("main nodes list = {:?}", nodes);
-        let response = Response::MainNodesList(nodes);
+        info!("scale nodes list = {:?}", nodes);
+        let response = Response::ScaleNodesList(nodes);
         let answer = Answer::Success(response);
         match handle.answer_channel.as_ref() {
             Some(ch) => (*ch).send(answer).unwrap(),
-            None => panic!("contract get main nodes list without answer channel"),
+            None => panic!("contract get scale nodes list without answer channel"),
         }
 
     }
 
-    pub fn count_main_nodes(&self, handle: Handle){
-        let num_main_node = self._count_main_nodes();
-        info!("count_main_nodes = {:?}", num_main_node);
-        let response = Response::CountMainNode(num_main_node);
+    pub fn count_scale_nodes(&self, handle: Handle){
+        let num_scale_node = self._count_scale_nodes();
+        info!("count_scale_nodes = {:?}", num_scale_node);
+        let response = Response::CountScaleNode(num_scale_node);
         let answer = Answer::Success(response);
         match handle.answer_channel.as_ref() {
             Some(ch) => (*ch).send(answer).unwrap(),
-            None => panic!("contract count main node without answer channel"),
+            None => panic!("contract count scale node without answer channel"),
         }
     }
 
-    pub fn add_main_node(&self, address: Address) {
+    pub fn add_scale_node(&self, address: Address, ip_addr: String, x1: U256, x2: U256, y1: U256, y2: U256) {
         let nonce = self._transaction_count();
-        let function_abi = _encode_addMainNode(address);
+        let function_abi = _encode_addScaleNode(address, ip_addr, x1, x2, y1, y2);
+        let gas = self._estimate_gas(function_abi.clone());
+
+        println!("{:?}", gas);
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
-            gas: ethereum_types::U256::from(100000),
+            gas: _convert_u256(gas),
             data: function_abi
         };
 
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         let tx_hash = self._send_transaction(signed_tx);
+        println!("{:?}", tx_hash);
+        if self.get_tx_receipt(tx_hash) {
+            println!("{:?}", tx_hash);
+        }
+    }
+
+    pub fn submit_vote(&self, header: String, sigx: U256, sigy: U256, bitset: U256) {
+        let nonce = self._transaction_count();
+        let private_key = _get_key_as_vec(self.my_account.private_key.clone());
+        let function_abi = _encode_submitVote(header, sigx, sigy, bitset);
+        //let gas = self._estimate_gas(function_abi.clone());
+        //  println!("{:?}", gas);
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: ethereum_types::U256::from(750000),
+            data: function_abi
+        };
+
+
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+        let tx_hash = self._send_transaction(signed_tx);
+        println!("{:?}", tx_hash);
+        if self.get_tx_receipt(tx_hash) {
+            println!("success");
+        }
     }
 
     pub fn send_block(&self, block: Block)  {
@@ -421,19 +457,35 @@ impl Contract {
         }
     }
 
-    fn _count_main_nodes(&self) -> usize {
+    pub fn _count_scale_nodes(&self) -> usize {
         let cnt: U256 = self.contract
-            .query("mainNodesCount", (), None, EthOption::default(), None)
+            .query("scaleNodesCount", (), None, EthOption::default(), None)
             .wait()
             .unwrap();
-            cnt.as_usize()
+        cnt.as_usize()
     }
 
-    fn _get_main_node(&self, index: usize) -> Address {
+    fn _get_scale_node(&self, index: usize) -> Address {
         self.contract
-            .query("getMainNode", (web3::types::U256::from(index), ), None, EthOption::default(), None)
+            .query("getScaleNode", (web3::types::U256::from(index), ), None, EthOption::default(), None)
             .wait()
             .unwrap()
+    }
+
+    pub fn _get_scale_id(&self, addr: Address) -> U256 {
+        self.contract
+            .query("getScaleID", (addr), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+
+    }
+
+    pub fn _get_scale_pub_key(&self, addr: Address) -> (U256, U256, U256, U256) {
+        self.contract
+            .query("getScalePubKey", (addr), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+
     }
 
     fn _send_transaction(&self, signed_tx: Vec<u8>) -> web3::types::H256 {
