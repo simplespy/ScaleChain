@@ -35,7 +35,8 @@ const ETH_CHAIN_ID: u32 = 3;
 
 pub struct Contract {
     contract: EthContract<web3::transports::Http>,
-    my_account: Account, 
+    my_account: Account,
+    key: BLSKey,
     contract_state: ContractState,
     contract_handle: Receiver<Handle>,
     mempool: Arc<Mutex<Mempool>>,
@@ -44,6 +45,7 @@ pub struct Contract {
     web3: web3::api::Web3<web3::transports::Http>,
     chain: Arc<Mutex<BlockChain>>,
     block_db: Arc<Mutex<BlockDb>>,
+    ip_addr: String
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -52,18 +54,19 @@ pub struct Account {
     contract_address: Address,
     address: Address,
     private_key: String,
-    ip_address: String,
 }
 
 impl Contract {
     pub fn new(
-        account: Account, 
+        account: Account,
+        key: BLSKey,
         performer_sender: Sender<TaskRequest>,
         server_control_sender: MioSender<ServerSignal>,
         contract_handle: Receiver<Handle>, 
         mempool: Arc<Mutex<Mempool>>,
         chain: Arc<Mutex<BlockChain>>,
-        block_db: Arc<Mutex<BlockDb>>,       
+        block_db: Arc<Mutex<BlockDb>>,
+        ip_addr: String
     ) -> Contract {
         let (eloop, http) = web3::transports::Http::new(&account.rpc_url).unwrap();
         eloop.into_remote();
@@ -74,6 +77,7 @@ impl Contract {
 
         let contract = Contract{
             contract,
+            key,
             performer_sender,
             server_control_sender,
             my_account: account, 
@@ -83,6 +87,7 @@ impl Contract {
             mempool,
             chain,
             block_db,
+            ip_addr
         };
 
         return contract;

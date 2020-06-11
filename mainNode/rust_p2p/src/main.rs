@@ -46,7 +46,7 @@ use log::{info, warn, error, debug};
 use contract::interface::{Handle, Answer};
 use contract::interface::Message as ContractMessage;
 use contract::interface::Response as ContractResponse;
-
+use contract::utils::{BLSKey, BLSKeyStr};
 
 
 
@@ -60,6 +60,7 @@ fn main() {
         (@arg ip: -i --ip  +takes_value "Sets ip to listen")
         (@arg port: -p --port  +takes_value "Sets port to listen")
         (@arg account: -d --account  +takes_value "Sets account address")
+        (@arg key: -k --key  +takes_value "Sets key address")
         (@arg api_port: -a --api_port  +takes_value "Sets port for api")
         (@arg has_token: -t --has_token  +takes_value "Sets init token")
         (@arg is_scale_node: -s --scale_node  +takes_value "Sets scalechain node")
@@ -72,6 +73,8 @@ fn main() {
     let api_port: String = matches.value_of("api_port").expect("missing api port").to_string();
     let neighbor_path = matches.value_of("neighbor").expect("missing neighbor file");
     let account_path = matches.value_of("account").expect("missing account file");
+    let key_path = matches.value_of("key").expect("missing key file");
+
     let has_token = matches.value_of("has_token").expect("missing token indicator");
     let is_scale_node: bool = matches.value_of("is_scale_node").expect("missing scalenode") == "1";
 
@@ -91,6 +94,9 @@ fn main() {
     // get accounts
     let file = File::open(account_path).unwrap();
     let account: Account = serde_json::from_reader(file).expect("deser account");
+    let key_file = File::open(key_path).unwrap();
+    let key_str: BLSKeyStr = serde_json::from_reader(key_file).expect("deser key file");
+    let key: BLSKey = BLSKey::new(key_str);
     let api_socket: SocketAddr = ("127.0.0.1:".to_string() + &api_port).parse().unwrap();
 
     // get main data structures 
@@ -112,13 +118,15 @@ fn main() {
                 schedule_handle_sender.clone()
                 )));
     let contract = Contract::new(
-        account, 
+        account,
+        key,
         task_sender.clone(),
         server_control_sender.clone(),
         contract_handle_receiver,
         mempool.clone(),
         blockchain.clone(),
         block_db.clone(),
+        listen_socket.to_string()
     );
 
     let mut token: Option<Token>;
