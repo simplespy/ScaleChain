@@ -1,5 +1,5 @@
 use std::sync::mpsc::{self};
-use super::message::{Message, TaskRequest, PeerHandle};
+use super::message::{Message, TaskRequest, PeerHandle, ChunkReply};
 use std::io::{self};
 use std::thread;
 use super::blockDb::{BlockDb};
@@ -25,6 +25,9 @@ use super::contract::utils;
 use std::collections::HashMap;
 use web3::types::{U256};
 use core::borrow::BorrowMut;
+use primitives::bytes::{Bytes};
+use ser::{deserialize, serialize};
+use super::cmtda::{BlockHeader};
 
 pub struct Performer {
     task_source: Receiver<TaskRequest>,
@@ -34,7 +37,7 @@ pub struct Performer {
     scheduler_handler: Sender<Option<Token>>,
     contract_handler: Sender<Handle>,
     addr: SocketAddr,
-    proposer_by_addr: HashMap<SocketAddr, Sender<String> >,
+    proposer_by_addr: HashMap<SocketAddr, Sender<ChunkReply> >,
     key_file: String,
     scale_id: usize,
     agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
@@ -267,7 +270,10 @@ impl Performer {
                         //let start_time = time::
                         // send neighbor to send chunks
                         let response_msg = Message::ScaleReqChunks;
+                        let samples_idx: Vec<u32> = vec![0; 20];
+                        let response_msg = Message::ScaleReqChunks(samples_idx);
                         peer_handle.response_sender.send(response_msg);
+
                         let keyfile = self.key_file.clone();
                         let scaleid = self.scale_id.clone();
                         let local_aggsig = self.agg_sig.clone();
@@ -347,23 +353,40 @@ impl Performer {
                         }
                     }
                 },
-                Message::ScaleReqChunks => {
+                Message::ScaleReqChunks(samples_idx) => {
+                    let sample_len = samples_idx.len();
+                    info!("{:?} receive ScaleReqChunks of size {:?}", self.addr, sample_len);
+                    // this client needs to prepare chunks in response to 
+                    let mut mempool = self.mempool.lock().expect("lock mempool");
+                    let (symbols, idx) = mempool.sample_cmt(samples_idx);
+                    //info!("{:?} after sample {:?} layer symbols {:?} idx", self.addr, symbols.len(), idx.len());
+                    // this sends chunk to the scale node
+                    let chunks = ChunkReply {
+                        symbols: symbols,
+                        idx: idx,
+                    };
+
+                    //info!("sent chunk size {}", chunks_ser.len());
+                    let response_msg = Message::ScaleReqChunksReply(chunks);
+
+                    task.peer.unwrap().response_sender.send(response_msg);
+                    info!("{:?} sent ScaleReqChunksReply", self.addr);
                     info!("{:?} receive ScaleReqChunks", self.addr);
                     // this client needs to prepare chunks in response to 
                     // scalenode
 
                     // this sends chunk to the scale node
-                    let response_msg = Message::ScaleReqChunksReply;
-                    task.peer.unwrap().response_sender.send(response_msg);
+                    //let response_msg = Message::ScaleReqChunksReply;
+                    //task.peer.unwrap().response_sender.send(response_msg);
                 },
-                Message::ScaleReqChunksReply => {
+                Message::ScaleReqChunksReply(chunks) => {
                     if self.scale_id > 0 {
                         info!("{:?} receive ScaleReqChunksReply", self.addr);
                         let proposer_socket = task.peer.unwrap().addr ;
                         
                         match &self.proposer_by_addr.get(&proposer_socket) {
                             Some(sender) => {
-                                sender.send("Chunk ready".to_string());
+                                sender.send(chunks);
                             },
                             None => info!("case when no proposer but receive chunk reply"),
                         }

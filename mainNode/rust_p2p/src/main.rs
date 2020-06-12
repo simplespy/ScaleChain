@@ -6,6 +6,11 @@ extern crate env_logger;
 extern crate rand;
 #[macro_use(lazy_static)]
 extern crate lazy_static;
+extern crate serialization as ser;
+
+#[macro_use]
+extern crate serialization_derive;
+
 mod network;
 mod api;
 mod crypto;
@@ -57,6 +62,7 @@ fn main() {
         (author: "Bowen Xue.<bx3@uw.edu>")
         (about: "simple blockchain network")
         (@arg neighbor: -n --neighbor +takes_value "Sets ip to connect to")
+        (@arg side_node: -o --side_node +takes_value "Sets side ip to connect to")
         (@arg ip: -i --ip  +takes_value "Sets ip to listen")
         (@arg port: -p --port  +takes_value "Sets port to listen")
         (@arg account: -d --account  +takes_value "Sets account address")
@@ -73,16 +79,21 @@ fn main() {
     let listen_socket: SocketAddr = (listen_ip.clone() + ":" + &listen_port).parse().unwrap();
     let api_port: String = matches.value_of("api_port").expect("missing api port").to_string();
     let neighbor_path = matches.value_of("neighbor").expect("missing neighbor file");
+    let sidenodes_path = matches.value_of("side_node").expect("missing side node file");
     let account_path = matches.value_of("account").expect("missing account file");
     let key_path = matches.value_of("key").expect("missing key file");
     let threshold: usize = matches.value_of("threshold").expect("missing threshold").parse::<usize>().unwrap();
 
     let has_token = matches.value_of("has_token").expect("missing token indicator");
-    let scale_id: usize = matches.value_of("scale_id").expect("missing scaleid").parse::<usize>().unwrap();
+    let mut scale_id: usize = matches.value_of("scale_id").expect("missing scaleid").parse::<usize>().unwrap();
 
     // connect to peer
     let f = File::open(neighbor_path).expect("Unable to open file");
     let f = BufReader::new(f);
+
+    let side_file = File::open(sidenodes_path).expect("Unable to open file");
+    let side_file = BufReader::new(side_file);
+    
 
     let mut neighbors: Vec<String> = vec![];
     for line in f.lines() {
@@ -92,6 +103,16 @@ fn main() {
             neighbors.push(line.to_string());
         }
     }
+
+    let mut sidenodes: Vec<String> = vec![];
+    for line in side_file.lines() {
+        let line = line.expect("Unable to read line").to_string();
+        if line != listen_socket.clone().to_string() {
+            println!("{:?} read neighbor {:?}", listen_socket, line);
+            sidenodes.push(line.to_string());
+        }
+    }
+
 
     // get accounts
     let file = File::open(account_path).unwrap();
@@ -106,7 +127,7 @@ fn main() {
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
 
     let (task_sender, task_receiver) =cbchannel::unbounded();
-    let is_scale_node: bool = (scale_id > 0);
+    let is_scale_node: bool = (scale_id >= 0);
     let (server, server_control_sender) = network::server::Context::new(
         task_sender.clone(), 
         listen_socket,

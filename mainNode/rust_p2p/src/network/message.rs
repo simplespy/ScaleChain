@@ -1,10 +1,21 @@
 use serde::{Serialize, Deserialize};
 use mio_extras::channel::{self, Sender};
 use std::sync::mpsc::{self};
-use super::primitive::block::{Block, Transaction, EthBlkTransaction};
+use super::primitive::block::{Transaction, EthBlkTransaction};
 use super::scheduler::Token;
 use std::net::{SocketAddr};
 use chain::{BlockHeader}; 
+use super::cmtda::{Block, H256, BLOCK_SIZE, HEADER_SIZE, read_codes};
+use ser::{deserialize, serialize};
+use primitives::bytes::{Bytes};
+use chain::decoder::{Symbol};
+use chain::big_array::{BigArray};
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChunkReply {
+    pub symbols: Vec<Vec<Symbol>>,
+    pub idx: Vec<Vec<u64>>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
@@ -13,9 +24,9 @@ pub enum Message {
     SyncBlock(EthBlkTransaction),
     SendTransaction(Transaction),
     PassToken(Token),
-    ProposeBlock(String), //BlockHeader //sender is client
-    ScaleReqChunks, //(id), // sender is scalenode
-    ScaleReqChunksReply,
+    ProposeBlock(Vec<u8>), //BlockHeader //sender is client
+    ScaleReqChunks(Vec<u32>), //(id), // sender is scalenode
+    ScaleReqChunksReply(ChunkReply),
     MySign(String, String, String, usize),
     ScaleGetAllChunks,
 }

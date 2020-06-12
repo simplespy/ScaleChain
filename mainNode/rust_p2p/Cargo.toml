@@ -30,5 +30,13 @@ secp256k1 = { version = "0.17.2", features = ["recovery"]}
 requests = "0.0.30"
 lazy_static = "1.4.0"
 
+heapsize = "0.4"
+rustc-hex = "2"
+byteorder = "1.0"
+bigint = "1.0"
+
 cmt = { path = "coded_merkle_tree" }
 chain = { path = "coded_merkle_tree/chain" }
+primitives = { path = "coded_merkle_tree/primitives" }
+serialization = { path = "coded_merkle_tree/serialization" }
+serialization_derive = { path = "coded_merkle_tree/serialization_derive" }

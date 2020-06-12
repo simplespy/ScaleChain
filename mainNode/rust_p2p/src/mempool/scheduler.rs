@@ -7,8 +7,9 @@ use super::message::{Message, ServerSignal};
 use mio_extras::channel::Sender as MioSender;
 use crossbeam::channel::{Receiver};
 use std::{thread, time};
-use super::cmtda::{BlockHeader, H256};
+use super::cmtda::{BlockHeader, Block, H256, BLOCK_SIZE, HEADER_SIZE, Transaction, read_codes};
 use super::contract::utils;
+use ser::{deserialize, serialize};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Token {
     pub version: usize,
@@ -86,27 +87,18 @@ impl Scheduler {
         if let Some(ref mut token) = self.token {
             info!("scheduler {:?} propose block", self.socket);
             let mut mempool = self.mempool.lock().unwrap();
-            let block = match mempool.prepare_block() {
-                None => return false,
-                Some(block) => block,
-            };
+            let header = mempool.prepare_cmt_block();
+            let header_bytes = serialize(&header);
+            let header_message: Vec<u8> = header_bytes.into(); //
+            //let block = match mempool.prepare_block() {
+            //    None => return false,
+            //    Some(block) => block,
+            //};
 
-            // get CMT
-            let header = BlockHeader {
-                version: 1,
-                previous_header_hash: H256::default(),
-                merkle_root_hash: H256::default(),
-                time: 4u32,
-                bits: 5.into(),
-                nonce: 6u32,
-                coded_merkle_roots_hashes: vec![H256::default(); 8],
-            };
-            // CMT - propose block
-
+           
             // broadcast block to scalenode
-            let random_header = utils::_generate_random_header();
-            let message =  Message::ProposeBlock(random_header);
-            // broadcast block without using CMT
+            //let random_header = utils::_generate_random_header();
+            let message =  Message::ProposeBlock(header_message); //random_header
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);
 
