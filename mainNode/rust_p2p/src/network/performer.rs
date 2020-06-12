@@ -1,5 +1,5 @@
 use std::sync::mpsc::{self};
-use super::message::{Message, TaskRequest, PeerHandle, ChunkReply};
+use super::message::{Message, TaskRequest, PeerHandle, ChunkReply, ServerSignal};
 use std::io::{self};
 use std::thread;
 use super::blockDb::{BlockDb};
@@ -27,6 +27,7 @@ use web3::types::{U256};
 use core::borrow::BorrowMut;
 use primitives::bytes::{Bytes};
 use ser::{deserialize, serialize};
+use mio_extras::channel::Sender as MioSender;
 use super::cmtda::{BlockHeader};
 
 pub struct Performer {
@@ -41,7 +42,8 @@ pub struct Performer {
     key_file: String,
     scale_id: usize,
     agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
-    threshold: usize
+    threshold: usize,
+    server_control_sender: MioSender<ServerSignal>,
     //curr_proposer: Option<Sender<String>>,
 }
 
@@ -57,6 +59,7 @@ impl Performer {
         key_file: String,
         scale_id: usize,
         threshold: usize,
+        server_control_sender: MioSender<ServerSignal>,
     ) -> Performer {
         Performer {
             task_source,
@@ -70,7 +73,8 @@ impl Performer {
             key_file,
             scale_id,
             agg_sig: Arc::new(Mutex::new(HashMap::new())),
-            threshold
+            threshold,
+            server_control_sender: server_control_sender,
             //curr_proposer: None,
         } 
     }
@@ -277,6 +281,7 @@ impl Performer {
                         let keyfile = self.key_file.clone();
                         let scaleid = self.scale_id.clone();
                         let local_aggsig = self.agg_sig.clone();
+                        let broadcaster = self.server_control_sender.clone();
                         // timed loop
                         thread::spawn(move || {
                             let mut num_chunk = 0;
@@ -296,7 +301,9 @@ impl Performer {
                                     let header = utils::_generate_random_header();
                                     let (sigx, sigy) = utils::_sign_bls(header.clone(), keyfile);
                                     let response_msg = Message::MySign(header.clone(), sigx.clone(), sigy.clone(), scaleid);
-                                    peer_handle.response_sender.send(response_msg);
+                                    let signal = ServerSignal::ServerBroadcast(response_msg);
+                                    broadcaster.send(signal);
+                                    //peer_handle.response_sender.send(response_msg);
 
                                     let mut aggsig = local_aggsig.lock().unwrap();
 

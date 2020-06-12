@@ -192,7 +192,8 @@ fn main() {
         listen_socket.clone(),
         key_path.to_string(),
             scale_id,
-        threshold
+        threshold,
+        server_control_sender.clone(),
     );
     performer.start();
 
