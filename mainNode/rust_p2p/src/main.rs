@@ -63,7 +63,8 @@ fn main() {
         (@arg key: -k --key  +takes_value "Sets key address")
         (@arg api_port: -a --api_port  +takes_value "Sets port for api")
         (@arg has_token: -t --has_token  +takes_value "Sets init token")
-        (@arg is_scale_node: -s --scale_node  +takes_value "Sets scalechain node")
+        (@arg scale_id: -s --scale_id  +takes_value "Sets scalechain node")
+        (@arg threshold: -h --threshold  +takes_value "Sets threshold ")
     )
     .get_matches();
 
@@ -74,9 +75,10 @@ fn main() {
     let neighbor_path = matches.value_of("neighbor").expect("missing neighbor file");
     let account_path = matches.value_of("account").expect("missing account file");
     let key_path = matches.value_of("key").expect("missing key file");
+    let threshold: usize = matches.value_of("threshold").expect("missing threshold").parse::<usize>().unwrap();
 
     let has_token = matches.value_of("has_token").expect("missing token indicator");
-    let is_scale_node: bool = matches.value_of("is_scale_node").expect("missing scalenode") == "1";
+    let scale_id: usize = matches.value_of("scale_id").expect("missing scaleid").parse::<usize>().unwrap();
 
     // connect to peer
     let f = File::open(neighbor_path).expect("Unable to open file");
@@ -104,6 +106,7 @@ fn main() {
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
 
     let (task_sender, task_receiver) =cbchannel::unbounded();
+    let is_scale_node: bool = (scale_id > 0);
     let (server, server_control_sender) = network::server::Context::new(
         task_sender.clone(), 
         listen_socket,
@@ -165,8 +168,10 @@ fn main() {
         mempool.clone(),
         schedule_handle_sender.clone(),
         contract_handle_sender.clone(),
-        is_scale_node,
         listen_socket.clone(),
+        key_path.to_string(),
+            scale_id,
+        threshold
     );
     performer.start();
 

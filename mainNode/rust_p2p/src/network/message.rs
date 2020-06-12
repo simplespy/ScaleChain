@@ -13,10 +13,10 @@ pub enum Message {
     SyncBlock(EthBlkTransaction),
     SendTransaction(Transaction),
     PassToken(Token),
-    ScaleProposeBlock(Block), //BlockHeader //sender is client
+    ProposeBlock(String), //BlockHeader //sender is client
     ScaleReqChunks, //(id), // sender is scalenode
     ScaleReqChunksReply,
-    MySign(String),
+    MySign(String, String, String, usize),
     ScaleGetAllChunks,
 }
 

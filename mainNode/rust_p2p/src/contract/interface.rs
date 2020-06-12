@@ -28,7 +28,7 @@ pub enum Message {
     SendBlock(Block),
     GetCurrState,
     CountScaleNodes,
-    AddScaleNode(Address, String, U256, U256, U256, U256),
+    AddScaleNode(String, String),
     GetScaleNodes,
     GetTxReceipt(H256),
     GetAll(([u8;32], usize, usize)), //inithash, start, end

@@ -17,6 +17,7 @@ use serde::{Serialize};
 use super::network::message::{PeerHandle};
 use super::network::message::Message as PerformerMessage;
 use super::experiment::snapshot::{PERFORMANCE_COUNTER};
+use web3::types::U256;
 
 pub struct ApiServer {
     addr: SocketAddr,
@@ -299,25 +300,42 @@ impl ApiServer {
                             };
                             respond_result!(request, true, format!("{:?}", scale_nodes));
                         },
-                        /*"/contract/add-scale-node" => {
+                        "/contract/add-scale-node" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
-                            let address = match pairs.get("address") {
+                            let id = match pairs.get("id") {
                                 Some(s) => s,
                                 None => {
-                                    respond_result!(request, false, "missing address");
+                                    respond_result!(request, false, "missing id");
+                                    return;
+                                },
+                            };
+                            let ip = match pairs.get("ip") {
+                                Some(s) => s,
+                                None => {
+                                    respond_result!(request, false, "missing ip");
                                     return;
                                 },
                             };
                             let (answer_tx, answer_rx) = channel::bounded(1);
-                            let address = address.parse().unwrap();
+                            //let id = id.parse().unwrap();
                             let handle = Handle {
-                                message: Message::AddScaleNode(address),
+                                message: Message::AddScaleNode(id.clone(), ip.clone()),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
-                            let reply = Response::from_string(format!("Add scaleNode {}", address));
+                            let reply = Response::from_string(format!("Add scaleNode {}", id));
                             request.respond(reply);
-                        },*/
+                        },
+                        "/contract/submit-vote" => {
+
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            //let id = id.parse().unwrap();
+                            let handle = Handle {
+                                message: Message::SubmitVote("hello".to_string(), U256::from(26),  U256::from(26), U256::from(26)),
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+                        },
                         "/contract/get-all" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {

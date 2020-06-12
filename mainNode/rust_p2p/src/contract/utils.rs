@@ -194,3 +194,24 @@ pub fn _str_to_block(block_str: String) -> Block   {
         },
     }
 }
+
+pub fn _generate_random_header() -> String {
+    let mut header = String::new();
+    for i in {0..8} {
+        header = format!("{}{}", header, hex::encode(web3::types::H256::random().as_bytes()))
+    }
+    header
+
+}
+
+pub fn _count_sig(x: usize) -> usize {
+    let mut cnt = 0;
+    let mut t = x;
+    while t > 0 {
+        if t.clone() % 2 == 1 {
+            cnt += 1;
+        }
+        t /= 2;
+    }
+    cnt
+}

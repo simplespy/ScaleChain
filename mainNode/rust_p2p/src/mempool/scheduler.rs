@@ -8,7 +8,7 @@ use mio_extras::channel::Sender as MioSender;
 use crossbeam::channel::{Receiver};
 use std::{thread, time};
 use super::cmtda::{BlockHeader, H256};
-
+use super::contract::utils;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Token {
     pub version: usize,
@@ -104,7 +104,8 @@ impl Scheduler {
             // CMT - propose block
 
             // broadcast block to scalenode
-            let message =  Message::ScaleProposeBlock(block);
+            let random_header = utils::_generate_random_header();
+            let message =  Message::ProposeBlock(random_header);
             // broadcast block without using CMT
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);

@@ -21,9 +21,10 @@ use super::primitive::block::{Block, EthBlkTransaction};
 extern crate crypto;
 use crypto::sha2::Sha256;
 use crypto::digest::Digest;
-
 use super::contract::utils;
 use std::collections::HashMap;
+use web3::types::{U256};
+use core::borrow::BorrowMut;
 
 pub struct Performer {
     task_source: Receiver<TaskRequest>,
@@ -32,9 +33,12 @@ pub struct Performer {
     mempool: Arc<Mutex<Mempool>>,
     scheduler_handler: Sender<Option<Token>>,
     contract_handler: Sender<Handle>,
-    is_scale_node: bool,
     addr: SocketAddr,
     proposer_by_addr: HashMap<SocketAddr, Sender<String> >,
+    key_file: String,
+    scale_id: usize,
+    agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
+    threshold: usize
     //curr_proposer: Option<Sender<String>>,
 }
 
@@ -46,8 +50,10 @@ impl Performer {
         mempool: Arc<Mutex<Mempool>>,
         scheduler_handler: Sender<Option<Token>>,
         contract_handler: Sender<Handle>,
-        is_scale_node: bool,
         addr: SocketAddr,
+        key_file: String,
+        scale_id: usize,
+        threshold: usize,
     ) -> Performer {
         Performer {
             task_source,
@@ -56,9 +62,12 @@ impl Performer {
             mempool: mempool,
             contract_handler: contract_handler,
             scheduler_handler: scheduler_handler,
-            is_scale_node: is_scale_node,
             addr: addr,
             proposer_by_addr: HashMap::new(),
+            key_file,
+            scale_id,
+            agg_sig: Arc::new(Mutex::new(HashMap::new())),
+            threshold
             //curr_proposer: None,
         } 
     }
@@ -244,9 +253,9 @@ impl Performer {
 
                 // temporary heck, need to move to scale-network
                 // CMT worker thread
-                Message::ScaleProposeBlock(Block) => {
-                    if self.is_scale_node {
-                        info!("{:?} receive ScaleProposeBlock", self.addr);
+                Message::ProposeBlock(header) => {
+                    if self.scale_id > 0 {
+                        info!("{:?} receive ProposeBlock", self.addr);
                         let local_addr = self.addr.clone();
                         let peer_handle = task.peer.unwrap();
                         let proposer_addr = peer_handle.addr;
@@ -259,10 +268,14 @@ impl Performer {
                         // send neighbor to send chunks
                         let response_msg = Message::ScaleReqChunks;
                         peer_handle.response_sender.send(response_msg);
+                        let keyfile = self.key_file.clone();
+                        let scaleid = self.scale_id.clone();
+                        let local_aggsig = self.agg_sig.clone();
                         // timed loop
                         thread::spawn(move || {
                             let mut num_chunk = 0;
                             let mut chunk_complete = false;
+
                             loop {
                                 match rx.recv() {
                                     Ok(reply) => {
@@ -274,10 +287,24 @@ impl Performer {
                                 if num_chunk > 0 {
                                     info!("{:?} is ready to aggregate sign", local_addr);
                                     // vote
-                                    let response_msg = Message::MySign(local_addr.to_string());
+                                    let header = utils::_generate_random_header();
+                                    let (sigx, sigy) = utils::_sign_bls(header.clone(), keyfile);
+                                    let response_msg = Message::MySign(header.clone(), sigx.clone(), sigy.clone(), scaleid);
                                     peer_handle.response_sender.send(response_msg);
-                                    
 
+                                    let mut aggsig = local_aggsig.lock().unwrap();
+
+
+                                    if aggsig.get(&header).is_none() {
+                                        aggsig.insert(header.clone(),  (sigx.clone(), sigy.clone(), (1 << scaleid)));
+                                    }
+                                    else {
+                                        let ( x, y, bitset) = aggsig.get(&header).unwrap();
+                                        let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx, sigy);
+                                        let bitset = bitset + (1 << scaleid);
+                                        aggsig.insert(header.clone(),  (sigx, sigy, bitset.clone()));
+                                    }
+                                    break;
                                 }
 
                                 //wait for other sign + modify rx message type
@@ -287,14 +314,38 @@ impl Performer {
                             // after time out
                             // vote and communicate signature depending on number of recv chunks
                             
-                        });  
+                        });
+
 
                     }
                 },
-                Message::MySign(m) => {
-                    info!("{:?} receive MySign message {:?}", self.addr, m);
+                Message::MySign(header , sigx, sigy, scale_id) => {
+                    info!("{:?} receive MySign message from node {:?}", self.addr, scale_id);
                     // send to spawned thread like ScaleReqChunksReply
 
+                    let local_aggsig = self.agg_sig.clone();
+                    let mut aggsig = local_aggsig.lock().unwrap();
+
+
+                    if aggsig.get(&header).is_none() {
+                        aggsig.insert(header.clone(),  (sigx, sigy, (1 << scale_id)));
+                    }
+                    else {
+                        let ( x, y, bitset) = aggsig.get(&header).unwrap().clone();
+                        if (1 << scale_id) & bitset.clone() == 0 {
+                            let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx.clone(), sigy.clone());
+                            let bitset = bitset + (1 << scale_id);
+                            aggsig.insert(header.clone(), (sigx.clone(), sigy.clone(), bitset.clone()));
+                        }
+                        if utils::_count_sig(bitset.clone()) > self.threshold {
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: ContractMessage::SubmitVote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
+                                answer_channel: Some(answer_tx),
+                            };
+                            self.contract_handler.send(handle);
+                        }
+                    }
                 },
                 Message::ScaleReqChunks => {
                     info!("{:?} receive ScaleReqChunks", self.addr);
@@ -306,7 +357,7 @@ impl Performer {
                     task.peer.unwrap().response_sender.send(response_msg);
                 },
                 Message::ScaleReqChunksReply => {
-                    if self.is_scale_node {
+                    if self.scale_id > 0 {
                         info!("{:?} receive ScaleReqChunksReply", self.addr);
                         let proposer_socket = task.peer.unwrap().addr ;
                         
@@ -320,7 +371,7 @@ impl Performer {
                     } 
                 },
                 Message::ScaleGetAllChunks => {
-                    if self.is_scale_node {
+                    if self.scale_id > 0 {
                         info!("{:?} receive ScaleGetAllChunks", self.addr);
 
                     }

@@ -104,10 +104,21 @@ impl Contract {
                                     self.send_block(block);
                                 },
                                 Message::SubmitVote(header, sigx, sigy, bitset) => {
-                                    self.submit_vote(header, sigx, sigy, bitset);
+                                    let header = _generate_random_header();
+                                    let (sigx, sigy) = _sign_bls(header.clone(), "node1".to_string());
+                                    let (sigx2, sigy2) = _sign_bls(header.clone(), "node2".to_string());
+                                    let (sigx3, sigy3) = _sign_bls(header.clone(), "node3".to_string());
+                                    let (sigx, sigy) = _aggregate_sig(sigx, sigy, sigx2, sigy2);
+                                    let (sigx, sigy) = _aggregate_sig(sigx, sigy, sigx3, sigy3);
+                                    self.submit_vote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26))
                                 },
-                                Message::AddScaleNode(address, ip_addr, x1, x2, y1, y2) => {
-                                    self.add_scale_node(address, ip_addr, x1, x2, y1, y2);
+                                Message::AddScaleNode(id, ip) => {
+                                    let file = File::open(format!("accounts/account{}", id)).unwrap();
+                                    let key_file = File::open(format!("keyfile/node{}", id)).unwrap();
+                                    let account: Account = serde_json::from_reader(file).expect("deser account");
+                                    let key_str: BLSKeyStr = serde_json::from_reader(key_file).expect("deser key file");
+                                    let key = BLSKey::new(key_str);
+                                    self.add_scale_node(account.address, ip, key.pkx1, key.pkx2, key.pky1, key.pky2);
                                 },
                                 Message::CountScaleNodes => {
                                     self.count_scale_nodes(handle);
@@ -189,8 +200,6 @@ impl Contract {
         let function_abi = _encode_addScaleNode(address, ip_addr, x1, x2, y1, y2);
         let gas = self._estimate_gas(function_abi.clone());
 
-        println!("{:?}", gas);
-
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
@@ -203,9 +212,8 @@ impl Contract {
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         let tx_hash = self._send_transaction(signed_tx);
-        println!("{:?}", tx_hash);
         if self.get_tx_receipt(tx_hash) {
-            println!("{:?}", tx_hash);
+            println!("tx_hash = {:?}", tx_hash);
         }
     }
 
@@ -228,9 +236,8 @@ impl Contract {
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         let tx_hash = self._send_transaction(signed_tx);
-        println!("{:?}", tx_hash);
         if self.get_tx_receipt(tx_hash) {
-            println!("success");
+            println!("tx_hash = {:?}", tx_hash);
         }
     }
 
