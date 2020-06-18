@@ -2,116 +2,96 @@ pragma solidity ^0.4.24;
 pragma experimental ABIEncoderV2;
 
 contract ScaleChain {
-    mapping(address => ScaleNode) public scale_nodes;
-    mapping(address => SideNode) public side_nodes;
-    ScaleNode[] public scale_id;
+    ScaleNode[] public scale_nodes;
+    mapping(address => uint) scale_id;
     bytes32[] public curr_hash;
     uint[] public block_id;
-    UnconfirmedBlock[] public buffer;
-    uint16 public threshold;
-
-    struct ScaleNode {
-        address eth_pk;
-        G2Point pub_key;
-        uint32 ip_addr;
-        uint index;
-    }
-
-    struct SideNode {
-        address eth_pk;
-        uint32 ip_addr;
-        uint sid;
-    }
-
-    struct UnconfirmedBlock {
-        string header;
-        uint sid;
-        uint bid;
-    }
+ //   uint[][] public signers; 
 
     struct G1Point {
         uint X;
         uint Y;
     }
-
     struct G2Point {
         uint[2] X;
         uint[2] Y;
     }
+    uint g2x1 = 11559732032986387107991004021392285783925812861821192530917403151452391805634;
+    uint g2x2 = 10857046999023057135944570762232829481370756359578518086990519993285655852781;
+    uint g2y1 = 4082367875863433681332203403145435568316851327593401208105741076214120093531;
+    uint g2y2 = 8495653923123431417604973247489272438418190587263600148770280649306958101930;
+
 
     function P1() internal returns (G1Point) {
         return G1Point(1, 2);
     }
 
     function P2() internal returns (G2Point) {
-        return G2Point(
-            [11559732032986387107991004021392285783925812861821192530917403151452391805634,
-            10857046999023057135944570762232829481370756359578518086990519993285655852781],
+        return G2Point([g2x1, g2x2], [g2y1, g2y2]);
+    }
+    struct ScaleNode {
+        address eth_addr;
+        string ip_addr;
+        uint pkx1;
+        uint pkx2;
+        uint pky1;
+        uint pky2;
 
-            [4082367875863433681332203403145435568316851327593401208105741076214120093531,
-            8495653923123431417604973247489272438418190587263600148770280649306958101930]
-        );
+    }
+    // Initialize ScaleNodes so that a sender of a new block
+    // has to be one of the scaleNode
+    constructor(address admin_addr) public {
+        scale_nodes.push(ScaleNode({
+            eth_addr: admin_addr,
+            ip_addr: "localhost",
+            pkx1: g2x1,
+            pkx2: g2x2,
+            pky1: g2y1,
+            pky2: g2y2
+        }));
+        scale_id[admin_addr] = 0;
+        addSideChain();
     }
 
-    constructor(address admin_address, uint16 t) public {
-        threshold = t;
-        uint index = 0;
-        scale_nodes[admin_address] = ScaleNode({
-            eth_pk: admin_address,
-            pub_key: P2(),
-            ip_addr: 0,
-            index: 0
-        });
-        scale_id.push(scale_nodes[admin_address]);
-        index += 1;
+    // Current ScaleNode authorize new ScaleNode
+    // Note: check msg.sender and not duplicate
+    function addScaleNode(address new_scale_node, string ip_addr, uint pkx1, uint pkx2, uint pky1, uint pky2) public {
+        require (scale_nodes[scale_id[msg.sender]].eth_addr == msg.sender);
+        require (new_scale_node != scale_nodes[0].eth_addr);
+        require (scale_id[new_scale_node] == 0);
+        scale_nodes.push(ScaleNode({
+            eth_addr: new_scale_node,
+            ip_addr: ip_addr,
+            pkx1: pkx1,
+            pkx2: pkx2,
+            pky1: pky1,
+            pky2: pky2
+        }));
+        scale_id[new_scale_node] = scale_nodes.length-1;
     }
 
-    // Register a new side chain with initialized SideNode list
-    function addSideChain(address[] side_node_addresses, uint32[] ip_addrs) public {
+    function addSideChain() public {
         block_id.push(0);
         curr_hash.push(0);
-        uint chain_id = block_id.length;
-        for (uint i = 0; i < side_node_addresses.length; ++i) {
-            side_nodes[side_node_addresses[i]] = SideNode({
-                eth_pk: side_node_addresses[i],
-                ip_addr: ip_addrs[i],
-                sid: chain_id-1
-            });
-        }
+        //uint[] memory new_signers; 
+      //  signers.push(new_signers);
     }
 
-    // Current SideNode authorize new SideNode
-    // check msg.sender and not duplicate
-    function addSideNode(address new_side_node, uint32 ip_addr, uint sid) public {
-        require(side_nodes[msg.sender].sid == sid);
-        require(side_nodes[new_side_node].sid != sid);
-        side_nodes[new_side_node] = SideNode({
-            eth_pk: new_side_node,
-            ip_addr: ip_addr,
-            sid: sid
-        });
+    // Get Ether node addresses
+    function getScaleNode(uint id) public view
+        returns (address scale_node_address) {
+            scale_node_address = scale_nodes[id].eth_addr;
     }
 
-    function addScaleNode(
-        address new_scale_node, 
-        uint pkx1, uint pkx2, 
-        uint pky1, uint pky2, 
-        uint32 ip_addr) public {
-
-        require(scale_nodes[msg.sender].eth_pk != address(0), "not permitted to add");
-        require(scale_nodes[new_scale_node].eth_pk == address(0), "already joined");
-        uint i = scale_id.length;
-        scale_nodes[new_scale_node] = ScaleNode ({
-            eth_pk: new_scale_node,
-            pub_key: G2Point([pkx1, pkx2], [pky1, pky2]),
-            ip_addr: ip_addr,
-            index: i
-        });
-        scale_id.push(scale_nodes[new_scale_node]);
+    function getScaleID(address addr) public view
+        returns (uint id) {
+            id = scale_id[addr];
     }
 
-    function scaleNodesCount() public view returns (uint num_scale) {
-        num_scale = scale_id.length;
+    function getScalePubKey(address addr) public view
+        returns (uint, uint, uint, uint) {
+            uint id = scale_id[addr];
+            return (scale_nodes[id].pkx1, scale_nodes[id].pkx2, scale_nodes[id].pky1, scale_nodes[id].pky2);
     }
 
     function getCurrentHash(uint sid) public view
@@ -122,6 +102,21 @@ contract ScaleChain {
     function getBlockID(uint sid) public view
         returns (uint bid) {
             bid = block_id[sid];
+    }
+
+  //  function getSigners(uint sid, uint bid) public view returns(uint bitset) {
+  //      bitset = signers[sid][bid];
+ //   }
+
+    function sideChainsCount() public view
+        returns (uint number_of_sideChains) {
+            number_of_sideChains = block_id.length;
+    }
+
+    // Get # of Ether nodes
+    function scaleNodesCount() public view
+        returns (uint number_of_scaleNodes) {
+            number_of_scaleNodes = scale_nodes.length;
     }
 
     function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
@@ -141,83 +136,22 @@ contract ScaleChain {
         signer_address = ecrecover(prefixedHash, v, r, s);
     }
     
-    function proposeBlock(string side_chain_block_header, bytes signature, uint new_block_id, uint sid) public {
+/*    function proposeBlock(string block_header, bytes signature, uint new_block_id) public {
         
-        // 1.check signed by one of sideNode within specific side chain
-        address signer_address = recoverSigner(side_chain_block_header, signature);
-        require (side_nodes[signer_address].sid == sid);
+        // 1.check signed by one of scaleNode
+        address signer_address = recoverSigner(block_header, signature);
+        require (scale_nodes[scale_id[signer_address]].eth_addr == signer_address);
 
         //Check whether the new_block_id = block_id + 1. If not, reject the block. 
-        require (block_id[sid] + 1 == new_block_id);
+        require (block_id + 1 == new_block_id);
 
-        // 2. add to buffer
-        buffer.push(UnconfirmedBlock({
-            header: side_chain_block_header,
-            sid: sid,
-            bid: new_block_id
-        }));
+        // 2. update hash tentative codes
+        bytes32 new_hash = sha256(curr_hash, sha256(block_header));
+        curr_hash = new_hash;
+        block_id = block_id + 1;
     }
-
-    function verifyBLS(bytes message, uint sigx, uint sigy, uint pkx1, uint pkx2, uint pky1, uint pky2) returns (bool) {
-        G1Point memory signature = G1Point(sigx, sigy);
-        G2Point memory pub_key = G2Point([pkx1, pkx2], [pky1, pky2]);
-        G1Point memory h = hashToG1(message);
-        return pairing2(negate(signature), P2(), h, pub_key);
-    }
-
-    function submitVote(bytes block_header, uint sigx, uint sigy, uint bitset) public {
-
-        // 1.check signed by one of scaleNodes
-        require(scale_nodes[msg.sender].eth_pk != address(0));
-        uint sid = 0;
-        uint bid = 0;
-
-        // 2.check the block header is in the buffer
-        for (uint i = 0; i < buffer.length; ++i) {
-            if (bytes(buffer[i].header).length == block_header.length && keccak256(buffer[i].header) == keccak256(block_header)) {
-                sid = buffer[i].sid;
-                bid = buffer[i].bid;
-            }
-        }
-        require(sid > 0);
-
-        // 3. check signature aggregation
-        i = 1;
-        uint bs = bitset;
-        uint cnt = 0;
-        while (bs > 0) {
-            if (bs % 2 == 1) {
-                cnt += 1;
-            }
-            bs /= 2;
-        }
-        G1Point[] memory a = new G1Point[](cnt);
-        G2Point[] memory b = new G2Point[](cnt);
-        a[0] = negate(G1Point(sigx, sigy));
-        b[0] = P2();
-        G1Point memory h0 = hashToG1(block_header);
-        bs = bitset;
-        while (bs > 0) {
-            if (bs % 2 == 1) {
-                a[i] = h0;
-                b[i] = scale_id[i].pub_key;
-            }
-            i += 1;
-            bs /= 2;
-        }
-        require(pairing(a, b));
-
-        // If pass, update hash
-        bytes32 new_hash = sha256(curr_hash[sid], sha256(block_header));
-        curr_hash[sid] = new_hash;
-        block_id[sid] = block_id[sid] + 1;
-
-
-    }
-
-
-
-      function pairing(G1Point[] p1, G2Point[] p2) internal returns (bool) {
+*/
+    function pairing(G1Point[] p1, G2Point[] p2) internal returns (bool) {
         require(p1.length == p2.length);
         uint elements = p1.length;
         uint inputSize = elements * 6;
@@ -253,6 +187,59 @@ contract ScaleChain {
         p2[0] = a2;
         p2[1] = b2;
         return pairing(p1, p2);
+    }
+
+    function submitVote(bytes block_header, uint sid, uint sigx, uint sigy, uint bitset) public {
+
+        // 1.check sent by one of scaleNodes
+        require(scale_nodes[scale_id[msg.sender]].eth_addr == msg.sender);
+
+        // 2. check block id
+     //   require(bid == block_id[sid] + 1);
+
+
+        // 3. check signature aggregation
+        require (bitset % 2 == 0);
+        uint bs = bitset / 2;
+        uint cnt = 0;
+        while (bs > 0) {
+            if (bs % 2 == 1) {
+                cnt += 1;
+            }
+            bs /= 2;
+        }
+        G1Point memory h0 = hashToG1(block_header);
+        
+        G1Point[] memory a = new G1Point[](cnt+1);
+        G2Point[] memory b = new G2Point[](cnt+1);
+        a[0] = negate(G1Point(sigx, sigy));
+        b[0] = P2();
+        bs = bitset / 2;
+        uint j = 1;
+        uint k = 1;
+        while (bs > 0) {
+            if (bs % 2 == 1) {
+                a[k] = h0;
+                b[k] = G2Point([scale_nodes[j].pkx1, scale_nodes[j].pkx2], [scale_nodes[j].pky1, scale_nodes[j].pky2]);
+                k += 1;
+            }
+            j += 1;
+            bs /= 2;
+        }
+        require(pairing(a, b));
+
+
+        // If pass, update hash
+        bytes32 new_hash = sha256(curr_hash[sid], sha256(block_header));
+        curr_hash[sid] = new_hash;
+      //  signers[sid].push(bitset);
+        block_id[sid] = block_id[sid] + 1;
+    }
+    function verifyBLS(bytes message, uint sigx, uint sigy, uint pkx1, uint pkx2, uint pky1, uint pky2) returns (bool) {
+        G1Point memory signature = G1Point(sigx, sigy);
+        G2Point memory pub_key = G2Point([pkx1, pkx2], [pky1, pky2]);
+        G1Point memory h = hashToG1(message);
+        return pairing2(negate(signature), P2(), h, pub_key);
     }
 
     function hashToG1(bytes message) internal returns (G1Point) {
@@ -310,5 +297,10 @@ contract ScaleChain {
         }
         require(success);
     }
+
+
+
+
+    
 
 }
