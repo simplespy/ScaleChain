@@ -12,8 +12,9 @@ pub struct BlockChain {
 
 impl BlockChain {
     pub fn new() -> BlockChain {
+        let genesis = ContractState::default();
         BlockChain {
-            blockchain: Vec::new(),
+            blockchain: vec![genesis],
         } 
     }
 

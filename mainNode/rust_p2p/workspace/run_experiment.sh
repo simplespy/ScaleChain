@@ -10,6 +10,11 @@ function kill_test() {
 
 pids="" 
 
+bash generate_tx_per_sec.sh 1 &
+pid="$!"
+echo $pid
+pids="$pids $pid"
+
 RUST_LOG=info ../target/debug/system_rust --threshold 3 --ip 127.0.0.1 --port 40000 --neighbor neighbors --side_node side_node --api_port 41000 --account accounts/account0 --key keyfile/node0 --has_token 0 --scale_id 1&
 pid="$!"
 echo $pid

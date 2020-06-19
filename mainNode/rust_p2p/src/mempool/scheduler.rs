@@ -4,6 +4,7 @@ use serde::{Serialize, Deserialize};
 use std::net::{SocketAddr};
 use super::mempool::{Mempool};
 use super::message::{Message, ServerSignal};
+use super::blockchain::{BlockChain};
 use mio_extras::channel::Sender as MioSender;
 use crossbeam::channel::{Receiver};
 use std::{thread, time};
@@ -23,6 +24,7 @@ pub struct Scheduler {
     pub mempool: Arc<Mutex<Mempool>>,
     pub server_control_sender: MioSender<ServerSignal>,
     pub handle: Receiver<Option<Token>>,
+    pub chain: Arc<Mutex<BlockChain>>, 
 }
 
 impl Scheduler {
@@ -32,6 +34,7 @@ impl Scheduler {
         mempool: Arc<Mutex<Mempool>>,
         server_control_sender: MioSender<ServerSignal>,
         handle: Receiver<Option<Token>>,
+        chain: Arc<Mutex<BlockChain>>
     ) -> Scheduler {
         Scheduler {
             socket,
@@ -39,6 +42,7 @@ impl Scheduler {
             mempool,
             server_control_sender,
             handle,
+            chain: chain,
         }
     }
 
@@ -85,28 +89,35 @@ impl Scheduler {
     pub fn propose_block(&mut self) -> bool {
         // pass token, drop token
         if let Some(ref mut token) = self.token {
-            info!("scheduler {:?} propose block", self.socket);
+            info!("{:?} scheduler propose block", self.socket);
             let mut mempool = self.mempool.lock().unwrap();
             let header = mempool.prepare_cmt_block();
+            drop(mempool);
             let header_bytes = serialize(&header);
-            let header_message: Vec<u8> = header_bytes.into(); //
-            //let block = match mempool.prepare_block() {
-            //    None => return false,
-            //    Some(block) => block,
-            //};
 
+            let header_message: Vec<u8> = header_bytes.into(); //
+            //let back: BlockHeader = deserialize(&header_message as &[u8]).unwrap();
+
+            // get block id
+            let chain = self.chain.lock().unwrap();
+            let tip_state = chain.get_latest_state().unwrap();
+            drop(chain);
+
+            
            
             // broadcast block to scalenode
             //let random_header = utils::_generate_random_header();
-            let message =  Message::ProposeBlock(header_message); //random_header
+            let message =  Message::ProposeBlock((header_message, tip_state.block_id)); //random_header
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);
 
             // new side chain message
 
             // Pass token
-            let sleep_time = time::Duration::from_millis(500);
+            info!("{:?} scheduler sleep", self.socket);
+            let sleep_time = time::Duration::from_millis(5000);
             thread::sleep(sleep_time);
+            info!("{:?} scheduler waked up", self.socket);
             if token.ring_size >= 2 {
                 let mut index = 0;
                 for sock in &token.node_list {

@@ -2,15 +2,24 @@ use super::hash::{H256};
 use super::block::{Block};
 use std::sync::{Mutex, Arc};
 use std::collections::{HashMap};
+use super::cmtda::H256 as CMTH256;
+use chain::block::Block as SBlock;
+use super::network::message::{ChunkReply};
+
+
 
 pub struct BlockDb {
-    block_db: HashMap<H256, Block>, //curr_hash -> Block  
+    pub block_db: HashMap<H256, Block>, //curr_hash -> Block  not used
+    pub cmt_db: HashMap<usize, Vec<ChunkReply> >,
+    pub sblock_db: HashMap<usize, SBlock>,
 }
 
 impl BlockDb {
     pub fn new() -> BlockDb{
         BlockDb {
             block_db: HashMap::new(), 
+            cmt_db: HashMap::new(),
+            sblock_db: HashMap::new(),
         }  
     }
     
@@ -20,6 +29,26 @@ impl BlockDb {
         match old_value {
             Some(v) => println!("key {:?}, v {:?}, new {:?}", hash, v, block),
             None => (),
+        }
+    }
+
+    pub fn insert_sblock(&mut self, block_id: usize, sblock: SBlock){
+        self.sblock_db.insert(block_id, sblock);
+    }
+
+    pub fn insert_cmt_sample(&mut self, block_id: usize , chunk: &ChunkReply) {
+        match self.cmt_db.get_mut(&block_id) {
+            Some(chunks) => chunks.push(chunk.clone()),
+            None => {
+                self.cmt_db.insert(block_id, vec![chunk.clone()]);
+            }
+        }
+    }
+
+    pub fn get_chunk(&self, block_id: usize) -> Vec<ChunkReply> {
+         match self.cmt_db.get(&block_id) {
+            Some(chunks) => return chunks.clone(),
+            None => vec![],
         }
     }
 

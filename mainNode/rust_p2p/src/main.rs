@@ -21,6 +21,7 @@ mod contract;
 mod experiment;
 mod mempool;
 mod cmtda;
+mod mainChainManager;
 
 
 
@@ -47,6 +48,7 @@ use rand::Rng;
 use std::net::{SocketAddr};
 use crossbeam::channel as cbchannel;
 use log::{info, warn, error, debug};
+use mainChainManager::{Manager};
 
 use contract::interface::{Handle, Answer};
 use contract::interface::Message as ContractMessage;
@@ -136,10 +138,12 @@ fn main() {
     server.start();
 
     let (contract_handle_sender, contract_handle_receiver) = cbchannel::unbounded();
+    let (manager_handle_sender, manager_handle_receiver) = cbchannel::unbounded();
     let (schedule_handle_sender, schedule_handle_receiver) = cbchannel::unbounded();
     let mempool = Arc::new(Mutex::new(Mempool::new(
                 contract_handle_sender.clone(),
-                schedule_handle_sender.clone()
+                schedule_handle_sender.clone(),
+                listen_socket.clone(),
                 )));
     let contract = Contract::new(
         account,
@@ -153,6 +157,16 @@ fn main() {
         listen_socket.to_string()
     );
 
+    let manager = Manager::new(
+            contract_handle_sender.clone(),
+            blockchain.clone(),
+            server_control_sender.clone(),
+            listen_socket.clone(),
+            manager_handle_receiver,
+            block_db.clone(),
+        );
+    manager.start();
+
     let mut token: Option<Token>;
     if has_token == "0" {
         token = None;
@@ -164,7 +178,7 @@ fn main() {
             ring_size: 1,
             node_list: vec![listen_socket.clone()],
         };
-        for neighbor in neighbors.clone().iter() {
+        for neighbor in sidenodes.clone().iter() {
             info!("token len increment 1");
             tok.ring_size += 1;
             let dest: SocketAddr = neighbor.parse().unwrap();
@@ -175,7 +189,7 @@ fn main() {
         }
         token = Some(tok);
     }
-    let scheduler = Scheduler::new(listen_socket.clone(), token, mempool.clone(), server_control_sender.clone(), schedule_handle_receiver.clone());
+    let scheduler = Scheduler::new(listen_socket.clone(), token, mempool.clone(), server_control_sender.clone(), schedule_handle_receiver.clone(), blockchain.clone());
     scheduler.start();
 
     contract.start();
@@ -194,6 +208,7 @@ fn main() {
             scale_id,
         threshold,
         server_control_sender.clone(),
+        manager_handle_sender.clone(),
     );
     performer.start();
 

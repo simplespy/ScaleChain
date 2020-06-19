@@ -32,6 +32,7 @@ pub fn convert_parity_to_symbol(parities: Vec<Vec<u64>>, n: u64) -> Vec<Vec<u64>
 	let mut codes_for_decoding: Vec<Code> = vec![];
 	for i in k_set.iter() {
 		let (code_e, code_d) = read_code_from_file(*i);
+        info!("read_code_from_file {}", i);
 		codes_for_encoding.push(code_e);
 		codes_for_decoding.push(code_d);
 	}

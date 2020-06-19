@@ -10,9 +10,11 @@ use ser::{deserialize, serialize};
 use primitives::bytes::{Bytes};
 use chain::decoder::{Symbol};
 use chain::big_array::{BigArray};
+use super::primitive::block::ContractState;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChunkReply {
+    //pub hash: H256,
     pub symbols: Vec<Vec<Symbol>>,
     pub idx: Vec<Vec<u64>>,
 }
@@ -24,11 +26,12 @@ pub enum Message {
     SyncBlock(EthBlkTransaction),
     SendTransaction(Transaction),
     PassToken(Token),
-    ProposeBlock(Vec<u8>), //BlockHeader //sender is client
+    ProposeBlock((Vec<u8>, usize)), //BlockHeader block_id //sender is client
     ScaleReqChunks(Vec<u32>), //(id), // sender is scalenode
     ScaleReqChunksReply(ChunkReply),
     MySign(String, String, String, usize),
-    ScaleGetAllChunks,
+    ScaleGetAllChunks(ContractState), // blockheader
+    ScaleGetAllChunksReply((Vec<ChunkReply>, usize)),
 }
 
 
