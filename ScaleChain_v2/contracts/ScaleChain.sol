@@ -6,7 +6,7 @@ contract ScaleChain {
     mapping(address => uint) scale_id;
     bytes32[] public curr_hash;
     uint[] public block_id;
- //   uint[][] public signers; 
+    uint[][] public signers; 
 
     struct G1Point {
         uint X;
@@ -73,8 +73,8 @@ contract ScaleChain {
     function addSideChain() public {
         block_id.push(0);
         curr_hash.push(0);
-        //uint[] memory new_signers; 
-      //  signers.push(new_signers);
+        uint[] memory new_signers; 
+        signers.push(new_signers);
     }
 
     // Get Ether node addresses
@@ -104,9 +104,9 @@ contract ScaleChain {
             bid = block_id[sid];
     }
 
-  //  function getSigners(uint sid, uint bid) public view returns(uint bitset) {
-  //      bitset = signers[sid][bid];
- //   }
+    function getSigners(uint sid, uint bid) public view returns(uint bitset) {
+        bitset = signers[sid][bid];
+    }
 
     function sideChainsCount() public view
         returns (uint number_of_sideChains) {
@@ -119,83 +119,22 @@ contract ScaleChain {
             number_of_scaleNodes = scale_nodes.length;
     }
 
-    function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
-        require(sig.length == 65);
-        assembly {
-            r := mload(add(sig, 32))
-            s := mload(add(sig, 64))
-            v := byte(0, mload(add(sig, 96)))
-        }
-        if (v < 27) v = v + 27;
+
+    function resetSideChain(uint sid) public {
+        block_id[sid] = 0;
+        curr_hash[sid] = 0;
+        uint[] memory new_signers; 
+        signers[sid] = new_signers;
     }
     
-    function recoverSigner(string block, bytes sig) returns (address signer_address) {
-        bytes memory prefix = "\x19Ethereum Signed Message:\n32";
-        bytes32 prefixedHash = sha3(prefix, sha3(block));
-        (uint8 v, bytes32 r, bytes32 s) = splitSignature(sig);
-        signer_address = ecrecover(prefixedHash, v, r, s);
-    }
     
-/*    function proposeBlock(string block_header, bytes signature, uint new_block_id) public {
-        
-        // 1.check signed by one of scaleNode
-        address signer_address = recoverSigner(block_header, signature);
-        require (scale_nodes[scale_id[signer_address]].eth_addr == signer_address);
 
-        //Check whether the new_block_id = block_id + 1. If not, reject the block. 
-        require (block_id + 1 == new_block_id);
-
-        // 2. update hash tentative codes
-        bytes32 new_hash = sha256(curr_hash, sha256(block_header));
-        curr_hash = new_hash;
-        block_id = block_id + 1;
-    }
-*/
-    function pairing(G1Point[] p1, G2Point[] p2) internal returns (bool) {
-        require(p1.length == p2.length);
-        uint elements = p1.length;
-        uint inputSize = elements * 6;
-        uint[] memory input = new uint[](inputSize);
-
-        for (uint i = 0; i < elements; i++)
-        {
-            input[i * 6 + 0] = p1[i].X;
-            input[i * 6 + 1] = p1[i].Y;
-            input[i * 6 + 2] = p2[i].X[0];
-            input[i * 6 + 3] = p2[i].X[1];
-            input[i * 6 + 4] = p2[i].Y[0];
-            input[i * 6 + 5] = p2[i].Y[1];
-        }
-
-        uint[1] memory out;
-        bool success;
-
-        assembly {
-            success := call(sub(gas, 2000), 8, 0, add(input, 0x20), mul(inputSize, 0x20), out, 0x20)
-        // Use "invalid" to make gas estimation work
-            switch success case 0 {invalid}
-        }
-        require(success);
-        return out[0] != 0;
-    }
-
-    function pairing2(G1Point a1, G2Point a2, G1Point b1, G2Point b2) internal returns (bool) {
-        G1Point[] memory p1 = new G1Point[](2);
-        G2Point[] memory p2 = new G2Point[](2);
-        p1[0] = a1;
-        p1[1] = b1;
-        p2[0] = a2;
-        p2[1] = b2;
-        return pairing(p1, p2);
-    }
-
-    function submitVote(bytes block_header, uint sid, uint sigx, uint sigy, uint bitset) public {
-
+    function submitVote(bytes block_header, uint sid, uint bid, uint sigx, uint sigy, uint bitset) public {
         // 1.check sent by one of scaleNodes
         require(scale_nodes[scale_id[msg.sender]].eth_addr == msg.sender);
 
         // 2. check block id
-     //   require(bid == block_id[sid] + 1);
+        require(bid == block_id[sid] + 1);
 
 
         // 3. check signature aggregation
@@ -230,11 +169,12 @@ contract ScaleChain {
 
 
         // If pass, update hash
-        bytes32 new_hash = sha256(curr_hash[sid], sha256(block_header));
-        curr_hash[sid] = new_hash;
-      //  signers[sid].push(bitset);
+        curr_hash[sid] = sha256(curr_hash[sid], sha256(block_header));
+        signers[sid].push(bitset);
         block_id[sid] = block_id[sid] + 1;
     }
+
+    
     function verifyBLS(bytes message, uint sigx, uint sigy, uint pkx1, uint pkx2, uint pky1, uint pky2) returns (bool) {
         G1Point memory signature = G1Point(sigx, sigy);
         G2Point memory pub_key = G2Point([pkx1, pkx2], [pky1, pky2]);
@@ -296,6 +236,77 @@ contract ScaleChain {
             switch success case 0 {invalid}
         }
         require(success);
+    }
+
+
+    function splitSignature(bytes memory sig) internal pure returns (uint8 v, bytes32 r, bytes32 s) {
+        require(sig.length == 65);
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
+        if (v < 27) v = v + 27;
+    }
+
+    function recoverSigner(string block, bytes sig) returns (address signer_address) {
+        bytes memory prefix = "\x19Ethereum Signed Message:\n32";
+        bytes32 prefixedHash = sha3(prefix, sha3(block));
+        (uint8 v, bytes32 r, bytes32 s) = splitSignature(sig);
+        signer_address = ecrecover(prefixedHash, v, r, s);
+    }
+    
+/*    function proposeBlock(string block_header, bytes signature, uint new_block_id) public {
+        
+        // 1.check signed by one of scaleNode
+        address signer_address = recoverSigner(block_header, signature);
+        require (scale_nodes[scale_id[signer_address]].eth_addr == signer_address);
+
+        //Check whether the new_block_id = block_id + 1. If not, reject the block. 
+        require (block_id + 1 == new_block_id);
+
+        // 2. update hash tentative codes
+        bytes32 new_hash = sha256(curr_hash, sha256(block_header));
+        curr_hash = new_hash;
+        block_id = block_id + 1;
+    }
+*/
+    function pairing(G1Point[] p1, G2Point[] p2) internal returns (bool) {
+        require(p1.length == p2.length);
+        uint elements = p1.length;
+        uint inputSize = elements * 6;
+        uint[] memory input = new uint[](inputSize);
+
+        for (uint i = 0; i < elements; i++)
+        {
+            input[i * 6 + 0] = p1[i].X;
+            input[i * 6 + 1] = p1[i].Y;
+            input[i * 6 + 2] = p2[i].X[0];
+            input[i * 6 + 3] = p2[i].X[1];
+            input[i * 6 + 4] = p2[i].Y[0];
+            input[i * 6 + 5] = p2[i].Y[1];
+        }
+
+        uint[1] memory out;
+        bool success;
+
+        assembly {
+            success := call(sub(gas, 2000), 8, 0, add(input, 0x20), mul(inputSize, 0x20), out, 0x20)
+        // Use "invalid" to make gas estimation work
+            switch success case 0 {invalid}
+        }
+        require(success);
+        return out[0] != 0;
+    }
+
+    function pairing2(G1Point a1, G2Point a2, G1Point b1, G2Point b2) internal returns (bool) {
+        G1Point[] memory p1 = new G1Point[](2);
+        G2Point[] memory p2 = new G2Point[](2);
+        p1[0] = a1;
+        p1[1] = b1;
+        p2[0] = a2;
+        p2[1] = b2;
+        return pairing(p1, p2);
     }
 
 
