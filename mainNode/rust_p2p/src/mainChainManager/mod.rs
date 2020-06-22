@@ -185,7 +185,7 @@ impl Manager {
                 info!("{:?} pulling for mainchain update", self.addr);
                 let (answer_tx, answer_rx) = channel::bounded(1);
                 let handle = Handle {
-                    message: ContractMessage::GetCurrState,
+                    message: ContractMessage::GetCurrState(0),
                     answer_channel: Some(answer_tx),
                 };
                 self.contract_handler.send(handle);

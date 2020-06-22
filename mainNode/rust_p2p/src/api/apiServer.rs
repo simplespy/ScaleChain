@@ -241,7 +241,7 @@ impl ApiServer {
                         "/contract/get-curr-state" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::GetCurrState,
+                                message: Message::GetCurrState(0),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
