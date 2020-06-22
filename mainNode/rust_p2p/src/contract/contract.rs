@@ -123,8 +123,8 @@ impl Contract {
                                 Message::CountScaleNodes => {
                                     self.count_scale_nodes(handle);
                                 },
-                                Message::GetCurrState => {
-                                    self.get_curr_state(handle); 
+                                Message::GetCurrState(sid) => {
+                                    self.get_curr_state(handle, sid);
                                 },
                                 Message::GetScaleNodes => {
                                     self.get_scale_nodes(handle);
@@ -141,6 +141,9 @@ impl Contract {
                                 Message::EstimateGas(block) => {
                                     self.estimate_gas(block);
                                 }
+                                Message::ResetChain(sid) => {
+                                    self.reset_chain(sid);
+                                }
                                 //...
                                 _ => {
                                     warn!("Unrecognized Message");
@@ -156,8 +159,8 @@ impl Contract {
         });
     }
 
-    pub fn get_curr_state(&self, handle: Handle) {
-        let curr_state = self._get_curr_state();
+    pub fn get_curr_state(&self, handle: Handle, sid: usize) {
+        let curr_state = self._get_curr_state(sid);
         let response = Response::GetCurrState(curr_state);
         let answer = Answer::Success(response);
         handle.answer_channel.unwrap().send(answer);
@@ -244,7 +247,7 @@ impl Contract {
     pub fn send_block(&self, block: Block)  {
         let str_block= _block_to_str(block.clone());
         let nonce = self._transaction_count();
-        let blk_id = self._get_blk_id();
+        let blk_id = self._get_blk_id(0);
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let signature = _sign_block(str_block.as_str(), &private_key);
         let function_abi = _encode_sendBlock(str_block, signature, blk_id + 1);
@@ -266,7 +269,7 @@ impl Contract {
         let tx_hash = self._send_transaction(signed_tx);
 
         if self.get_tx_receipt(tx_hash) {
-            let curr_state = self._get_curr_state();
+            let curr_state = self._get_curr_state(0);
 
             // update local blockchain
             let mut chain = self.chain.lock().unwrap();
@@ -292,7 +295,7 @@ impl Contract {
         let mut file = OpenOptions::new().append(true).open("gas_history.csv").unwrap();
         let str_block= _block_to_str(block.clone());
         let nonce = self._transaction_count();
-        let blk_id = self._get_blk_id();
+        let blk_id = self._get_blk_id(0);
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let signature = _sign_block(str_block.as_str(), &private_key);
         let function_abi = _encode_sendBlock(str_block, signature, blk_id + 1);
@@ -439,9 +442,33 @@ impl Contract {
         return transactions;
     }
 
-    fn _get_blk_id(&self) -> U256 {
+    fn reset_chain(&self, sid: usize)  {
+        let nonce = self._transaction_count();
+        let function_abi = _encode_resetSideChain(U256::from(sid));
+        let gas = self._estimate_gas(function_abi.clone());
+
+        //println!("{:?}", gas);
+
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: _convert_u256(gas),
+            data: function_abi
+        };
+        let now = time::Instant::now();
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+        let tx_hash = self._send_transaction(signed_tx);
+        if self.get_tx_receipt(tx_hash) {
+            println!("{:?},{:?}", tx_hash, now.elapsed().as_secs());
+        }
+    }
+
+    fn _get_blk_id(&self, sid: usize) -> U256 {
         self.contract
-            .query("getBlockID", (), None, EthOption::default(), None)
+            .query("getBlockID", (web3::types::U256::from(sid),), None, EthOption::default(), None)
             .wait()
             .unwrap()
     }
@@ -453,16 +480,16 @@ impl Contract {
             .unwrap()
     }
 
-    fn _get_curr_hash(&self) -> web3::types::H256 {
+    fn _get_curr_hash(&self, sid: usize) -> web3::types::H256 {
         self.contract
-            .query("getCurrentHash", (), None, EthOption::default(), None)
+            .query("getCurrentHash", (web3::types::U256::from(sid),), None, EthOption::default(), None)
             .wait()
             .unwrap()
     }
 
-    fn _get_curr_state(&self) -> ContractState {
-        let hash = self._get_curr_hash();
-        let blk_id = self._get_blk_id();
+    fn _get_curr_state(&self, sid: usize) -> ContractState {
+        let hash = self._get_curr_hash(sid);
+        let blk_id = self._get_blk_id(sid);
         ContractState {
             curr_hash: hash.into(),
             block_id: blk_id.as_usize(),

@@ -75,6 +75,17 @@ pub fn _encode_submitVote(block: String, sigx: U256, sigy: U256, bitset: U256) -
     return function_abi;
 }
 
+pub fn _encode_resetSideChain(sid: U256) -> Vec<u8> {
+    let command = format!("ethabi encode function --lenient ./abi.json resetSideChain -p {}", sid);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+    println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
 pub fn _decode_sendBlock(input: &str) -> (String, usize) {
     let command = format!("ethabi decode params -t string -t bytes -t uint256 {}", input);
     let output = Command::new("sh").arg("-c")

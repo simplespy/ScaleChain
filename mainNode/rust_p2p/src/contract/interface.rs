@@ -26,7 +26,7 @@ pub enum Answer {
 #[derive(Clone)]
 pub enum Message {
     SendBlock(Block),
-    GetCurrState,
+    GetCurrState(usize),
     CountScaleNodes,
     AddScaleNode(String, String),
     GetScaleNodes,
@@ -35,6 +35,7 @@ pub enum Message {
     SyncChain,
     EstimateGas(Block),
     SubmitVote(String, U256, U256, U256),
+    ResetChain(usize)
 }
 
 pub enum Error {

@@ -1,6 +1,6 @@
 {
 	"rpc_url": "https://ropsten.infura.io/v3/fd7fd90847cd4ca99ce886d4bffdccf8",
-	"contract_address": "0x167e81Af3B3E756d07Eb323D4B7AC5eF36aE58b9",
+	"contract_address": "0x6ad516C899F432a26f2962DF662d2e8d929b621a",
 	"address": "0x97952767d3748fa35443c6319ea0ef192c5d1a76",
     "private_key": "0xE02F6780A5F946DA0D818984E8EE4058BBDB3400DB79396615C5B7B314FF6DFE"
 }
