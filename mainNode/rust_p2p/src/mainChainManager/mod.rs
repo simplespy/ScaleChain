@@ -15,7 +15,13 @@ use chain::block::Block as SBlock;
 use chain::decoder::CodingErr;
 use chain::decoder::{Symbol};
 use chain::decoder::{Code, Decoder, TreeDecoder, IncorrectCodingProof};
-use super::cmtda::{read_codes};
+use super::cmtda::{read_codes, BlockHeader};
+use super::cmtda::Transaction as CMTTransaction;
+use primitives::bytes::{Bytes};
+use crypto::sha3::Sha3;
+use crypto::digest::Digest;
+use super::primitive::hash::H256;
+use ser::{deserialize, serialize};
 
 pub struct Manager {
     pub contract_handler: Sender<Handle>,
@@ -23,16 +29,22 @@ pub struct Manager {
     pub block_db: Arc<Mutex<BlockDb>>,
     pub server_control_sender: MioSender<ServerSignal>,
     pub addr: SocketAddr,
-    pub job_sink: Receiver<(usize, Vec<ChunkReply>)>,
-    pub chunk_senders: HashMap<usize, Sender<Vec<ChunkReply>> >,
+    pub job_sink: Receiver<(usize, ChunkReply)>,
+    pub chunk_senders: HashMap<usize, Sender<ChunkReply> >,
+    pub codes_for_encoding: Vec<Code>,
+    pub codes_for_decoding: Vec<Code>,
+    pub k_set: Vec<u64>,
 }
 
 pub struct JobManager {
     state: ContractState,
     addr: SocketAddr,
     server_control_sender: MioSender<ServerSignal>,
-    chunk_receiver: Receiver<Vec<ChunkReply>>,
+    chunk_receiver: Receiver<ChunkReply>,
     block_source: Sender<Result<SBlock, CodingErr>>,
+    codes_for_encoding: Vec<Code>,
+    codes_for_decoding: Vec<Code>,
+    k_set: Vec<u64>,
 }
 
 // currently only handle one layer encoding
@@ -47,45 +59,78 @@ fn collect_cmt_chunks(job_manager: JobManager)
         // accumulate chunks
         match chunk_receiver.recv() {
             // accumulate chunks 
-            Ok(chunks) => {
-                let num_layer = chunks.len();
-                info!("{:?} recv chunks", job_manager.addr);
-
-                for chunk in &chunks {
-                    if is_first_recv {
-                        is_first_recv = false;
-                        coll_symbols = chunk.symbols.clone();
-                        coll_idx = chunk.idx.clone();
-                    } else {
-                        for l in 0..num_layer {
-                            let symbols = &chunk.symbols[l];
-                            let idx = &chunk.idx[l];
-                            let mut c_symbols = &mut coll_symbols[l];
-                            let mut c_idx = &mut coll_idx[l];
-                            let mut j =0;
-                            for i in idx {
-                                if c_idx.contains(i) {
-                                    //
-                                } else {
-                                    c_idx.push(*i);
-                                    c_symbols.push(symbols[j]);
-                                }
-                                j += 1;
+            Ok(chunk) => {
+                info!("{:?} get all receive chunks", job_manager.addr);
+                let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();;
+                let mut hash  = [0u8; 32];
+                let header_hex: String = hex::encode(&chunk.header);
+                // get hash in the same way as bls
+                let mut hasher = Sha3::keccak256();
+                hasher.input_str(&header_hex);
+                hasher.result(&mut hash);
+                let hash: H256 = H256(hash);
+                info!("header hash {:?}", hash);
+                
+                // compare if smart contract hash equals to local
+                if hash != job_manager.state.curr_hash {
+                    info!("{:?}, inconsistent hash {:?} {:?}", 
+                          job_manager.addr,
+                          hash, 
+                          job_manager.state.curr_hash); 
+                    continue;
+                }
+                
+                let num_layer = job_manager.k_set.len();
+                if is_first_recv {
+                    is_first_recv = false;
+                    coll_symbols = chunk.symbols.clone();
+                    coll_idx = chunk.idx.clone();
+                } else {
+                    for l in 0..num_layer {
+                        let symbols = &chunk.symbols[l];
+                        let idx = &chunk.idx[l];
+                        let mut c_symbols = &mut coll_symbols[l];
+                        let mut c_idx = &mut coll_idx[l];
+                        let mut j =0;
+                        for i in idx {
+                            if c_idx.contains(i) {
+                                //
+                            } else {
+                                c_idx.push(*i);
+                                c_symbols.push(symbols[j]);
                             }
+                            j += 1;
                         }
                     }
                 }
+
+                //let mut recon:Vec<u8> = vec![];
+                //let systematic_symbol_len = k_set[0];
+                //for i in 0..systematic_symbol_len {
+                    //for j in 0..(coll_symbols[0].len()) {
+                        //if idx[0][j] == i as u64 {
+                            //match symbols[0][j] {
+                                //Symbol::Base(s) => recon.extend_from_slice(&s),
+                                //_ => unreachable!(),
+                            //}
+                        //}
+                    //}
+                //}
+
+                //let mut trans_byte = cmt_block.transactions.iter().map(CMTTransaction::bytes).collect::<Vec<Bytes>>();
+                //info!("trans_byte {:?}", trans_byte);
+
+                //info!("recon len {}", recon.len());
+                //info!("{:?}", hex::encode(recon));
                 
                 // accumulate chunks + currently only handle single layer
-                //let k_set: Vec<u64> = vec![16];
-                //let (codes_for_encoding, codes_for_decoding) = read_codes(k_set);
-                //let mut decoder: TreeDecoder = TreeDecoder::new(
-                //    codes_for_decoding.to_vec(), 
-                //    &cmt_block.block_header.coded_merkle_roots_hashes);
-                //let mut cmt_pass = match decoder.run_tree_decoder(symbols.clone(), idx.clone()) {
-                //    Ok(()) => true,
-                //    _ => false,
-                //};
+                let mut decoder: TreeDecoder = TreeDecoder::new(
+                    job_manager.codes_for_decoding.to_vec(), 
+                    &header.coded_merkle_roots_hashes);
+                let mut cmt_pass = match decoder.run_tree_decoder(coll_symbols.clone(), coll_idx.clone()) {
+                    Ok(()) => true,
+                    _ => false,
+                };
                 let cmt_pass = true;
                 if cmt_pass {
                     info!("{:?} cmt pass", job_manager.addr);
@@ -108,8 +153,11 @@ impl Manager {
         chain: Arc<Mutex<BlockChain>>,
         server_control_sender: MioSender<ServerSignal>,
         addr: SocketAddr,     
-        job_sink: Receiver<(usize, Vec<ChunkReply>)>,
+        job_sink: Receiver<(usize, ChunkReply)>,
         block_db: Arc<Mutex<BlockDb>>,
+        codes_for_encoding: Vec<Code>,
+        codes_for_decoding: Vec<Code>,
+        k_set: Vec<u64>,
     ) -> Manager {
         Manager {
             contract_handler: contract_handler,
@@ -119,6 +167,9 @@ impl Manager {
             chunk_senders: HashMap::new(),
             job_sink: job_sink,
             block_db: block_db,
+            codes_for_encoding: codes_for_encoding,
+            codes_for_decoding: codes_for_decoding,
+            k_set: k_set,
         }
     }
 
@@ -185,7 +236,7 @@ impl Manager {
                 info!("{:?} pulling for mainchain update", self.addr);
                 let (answer_tx, answer_rx) = channel::bounded(1);
                 let handle = Handle {
-                    message: ContractMessage::GetCurrState,
+                    message: ContractMessage::GetCurrState(0),
                     answer_channel: Some(answer_tx),
                 };
                 self.contract_handler.send(handle);
@@ -209,6 +260,7 @@ impl Manager {
                                                 if self.chunk_senders.contains_key(&state.block_id) {
                                                     continue;
                                                 } 
+                                                info!("manager found new state {:?} tip_state {:?}", state, tip_state);
 
                                                 // get block from scale node network
                                                 let (chunk_sender, chunk_receiver) = crossbeam::channel::unbounded();
@@ -222,6 +274,9 @@ impl Manager {
                                                     server_control_sender: self.server_control_sender.clone(),
                                                     chunk_receiver: chunk_receiver,
                                                     block_source: block_sender,
+                                                    k_set: self.k_set.clone(),
+                                                    codes_for_encoding: self.codes_for_encoding.clone(),
+                                                    codes_for_decoding: self.codes_for_decoding.clone(),
                                                 };
 
                                                 // create a new handler for each block

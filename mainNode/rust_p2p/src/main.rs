@@ -49,7 +49,8 @@ use std::net::{SocketAddr};
 use crossbeam::channel as cbchannel;
 use log::{info, warn, error, debug};
 use mainChainManager::{Manager};
-
+use cmtda::{read_codes};
+use chain::decoder::{Code};
 use contract::interface::{Handle, Answer};
 use contract::interface::Message as ContractMessage;
 use contract::interface::Response as ContractResponse;
@@ -140,10 +141,14 @@ fn main() {
     let (contract_handle_sender, contract_handle_receiver) = cbchannel::unbounded();
     let (manager_handle_sender, manager_handle_receiver) = cbchannel::unbounded();
     let (schedule_handle_sender, schedule_handle_receiver) = cbchannel::unbounded();
+    let k_set: Vec<u64> = vec![32,16,8]; //512,256,128, 64
+    let (codes_for_encoding, codes_for_decoding) = read_codes(k_set.clone());
     let mempool = Arc::new(Mutex::new(Mempool::new(
                 contract_handle_sender.clone(),
                 schedule_handle_sender.clone(),
                 listen_socket.clone(),
+                codes_for_encoding.clone(),
+                codes_for_decoding.clone(),
                 )));
     let contract = Contract::new(
         account,
@@ -164,6 +169,9 @@ fn main() {
             listen_socket.clone(),
             manager_handle_receiver,
             block_db.clone(),
+            codes_for_encoding.clone(),
+            codes_for_decoding.clone(),
+            k_set.clone()
         );
     manager.start();
 

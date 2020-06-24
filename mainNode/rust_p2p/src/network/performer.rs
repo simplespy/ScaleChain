@@ -18,6 +18,7 @@ use std::net::{SocketAddr};
 use super::primitive::hash::{H256};
 use super::crypto::hash;
 use super::primitive::block::{Block, EthBlkTransaction};
+use chain::transaction::Transaction;
 extern crate crypto;
 use crypto::sha2::Sha256;
 use crypto::digest::Digest;
@@ -46,7 +47,7 @@ pub struct Performer {
     agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
     threshold: usize,
     server_control_sender: MioSender<ServerSignal>,
-    manager_source: Sender<(usize, Vec<ChunkReply>)>,
+    manager_source: Sender<(usize, ChunkReply)>,
     //curr_proposer: Option<Sender<String>>,
 }
 
@@ -63,7 +64,7 @@ impl Performer {
         scale_id: usize,
         threshold: usize,
         server_control_sender: MioSender<ServerSignal>,
-        manager_source: Sender<(usize, Vec<ChunkReply>)>,
+        manager_source: Sender<(usize, ChunkReply)>,
     ) -> Performer {
         Performer {
             task_source,
@@ -139,7 +140,7 @@ impl Performer {
     fn get_eth_curr_state(&self) -> ContractState {
         let (answer_tx, answer_rx) = channel::bounded(1);
         let handle = Handle {
-            message: ContractMessage::GetCurrState,
+            message: ContractMessage::GetCurrState(0),
             answer_channel: Some(answer_tx),
         };
         self.contract_handler.send(handle);
@@ -252,7 +253,8 @@ impl Performer {
                     info!("receive sync block");
                     self.update_block(main_node_block);
                 },
-                Message::SendTransaction(transaction) => {
+                Message::SendTransaction(transaction_ser) => {
+                    let transaction: Transaction = deserialize(&transaction_ser as &[u8]).unwrap();
                     let mut mempool = self.mempool.lock().expect("perform locl mempool");
                     mempool.insert(transaction);
                     drop(mempool);
@@ -299,7 +301,7 @@ impl Performer {
                             loop {
                                 match rx.recv() {
                                     Ok(chunk_reply) => {
-                                        info!("receive ScaleReqChunksreply"); 
+                                        info!("{:?}, receive ScaleReqChunksreply", local_addr); 
                                         let mut local_db = db.lock().unwrap();
                                         let header_cmt: BlockHeader = deserialize(&header.clone() as &[u8]).unwrap();
                                         // compute id
@@ -369,9 +371,11 @@ impl Performer {
                     // this client needs to prepare chunks in response to 
                     let mut mempool = self.mempool.lock().expect("lock mempool");
                     let (header, symbols, idx) = mempool.sample_cmt(samples_idx);
+                    let header_bytes = serialize(&header);
 
                     // this sends chunk to the scale node
                     let chunks = ChunkReply {
+                        header: header_bytes.into(),
                         symbols: symbols,
                         idx: idx,
                     };
@@ -402,7 +406,8 @@ impl Performer {
                         let local_db = self.block_db.lock().unwrap();
                         let chunks = local_db.get_chunk(state.block_id);
                         drop(local_db);
-                        let response_msg = Message::ScaleGetAllChunksReply((chunks, state.block_id));
+                        // TODO currently a hack, assume there is only one chunk
+                        let response_msg = Message::ScaleGetAllChunksReply((chunks[0].clone(), state.block_id));
                         task.peer.unwrap().response_sender.send(response_msg);
                     }
                 },

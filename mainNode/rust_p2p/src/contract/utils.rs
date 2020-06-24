@@ -41,7 +41,7 @@ impl BLSKey {
 
 pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> Vec<u8> {
     let command = format!("ethabi encode function --lenient ./abi.json sendBlock -p {} -p {} -p {}", block, signature, new_blk_id);
-    println!("command {}", command.clone());
+    //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -66,7 +66,7 @@ pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U25
 
 pub fn _encode_submitVote(block: String, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
     let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {}", block, sigx, sigy, bitset);
-    println!("command {}", command.clone());
+    //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -102,7 +102,7 @@ pub fn _decode_sendBlock(input: &str) -> (String, usize) {
 
 pub fn _sign_bls(msg: String, key_file: String) -> (String, String) {
     let command = format!("./sign -msg={} -key=keyfile/{}", msg, key_file);
-    println!("command {}", command.clone());
+    //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -117,7 +117,7 @@ pub fn _sign_bls(msg: String, key_file: String) -> (String, String) {
 
 pub fn _aggregate_sig(x1: String, y1: String, x2: String, y2: String)-> (String, String) {
     let command = format!("./aggregate -x1={} -y1={} -x2={} -y2={}", x1, y1, x2, y2);
-    println!("command {}", command.clone());
+    //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();

@@ -115,7 +115,7 @@ impl Scheduler {
 
             // Pass token
             info!("{:?} scheduler sleep", self.socket);
-            let sleep_time = time::Duration::from_millis(5000);
+            let sleep_time = time::Duration::from_millis(500);
             thread::sleep(sleep_time);
             info!("{:?} scheduler waked up", self.socket);
             if token.ring_size >= 2 {

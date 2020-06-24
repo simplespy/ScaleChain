@@ -1,7 +1,8 @@
 use serde::{Serialize, Deserialize};
 use mio_extras::channel::{self, Sender};
 use std::sync::mpsc::{self};
-use super::primitive::block::{Transaction, EthBlkTransaction};
+use super::primitive::block::{EthBlkTransaction};
+use chain::transaction::Transaction;
 use super::scheduler::Token;
 use std::net::{SocketAddr};
 use chain::{BlockHeader}; 
@@ -14,7 +15,7 @@ use super::primitive::block::ContractState;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChunkReply {
-    //pub hash: H256,
+    pub header: Vec<u8>,
     pub symbols: Vec<Vec<Symbol>>,
     pub idx: Vec<Vec<u64>>,
 }
@@ -24,14 +25,14 @@ pub enum Message {
     Ping(String),
     Pong(String),
     SyncBlock(EthBlkTransaction),
-    SendTransaction(Transaction),
+    SendTransaction(Vec<u8>), //Transaction
     PassToken(Token),
     ProposeBlock((Vec<u8>, usize)), //BlockHeader block_id //sender is client
     ScaleReqChunks(Vec<u32>), //(id), // sender is scalenode
     ScaleReqChunksReply(ChunkReply),
     MySign(String, String, String, usize),
     ScaleGetAllChunks(ContractState), // blockheader
-    ScaleGetAllChunksReply((Vec<ChunkReply>, usize)),
+    ScaleGetAllChunksReply((ChunkReply, usize)),
 }
 
 

@@ -1,6 +1,6 @@
 use std::collections::{HashMap};
 use super::hash::{H256};
-use super::block::{Block, Transaction, Header};
+use super::block::{Block, Header};
 use super::blockchain::{BlockChain};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self};
@@ -12,12 +12,13 @@ use crossbeam::channel::{self, Sender};
 use super::scheduler::{Token};
 
 use super::cmtda::Block as CMTBlock;
-use super::cmtda::Transaction as CMTTransaction;
+use super::cmtda::Transaction;
 use super::cmtda::H256 as CMTH256;
 
 use super::cmtda::{BlockHeader, BLOCK_SIZE, HEADER_SIZE, read_codes};
 use chain::decoder::{Code, Decoder, TreeDecoder, CodingErr, IncorrectCodingProof};
 use chain::decoder::{Symbol};
+use primitives::bytes::{Bytes};
 use ser::{deserialize, serialize};
 use std::net::{SocketAddr};
 
@@ -29,6 +30,8 @@ pub struct Mempool {
     returned_blocks: VecDeque<Block>,
     cmt_block: Option<CMTBlock>,
     addr: SocketAddr,
+    codes_for_encoding: Vec<Code>,
+    codes_for_decoding: Vec<Code>,
 }
 
 impl Mempool {
@@ -36,7 +39,10 @@ impl Mempool {
         contract_handler: Sender<Handle>,
         schedule_handler: Sender<Option<Token>>,
         addr: SocketAddr,
+        codes_for_encoding: Vec<Code>,
+        codes_for_decoding: Vec<Code>,
     ) -> Mempool {
+        
         Mempool {
             transactions: VecDeque::new(), 
             block_size: 1,
@@ -45,6 +51,8 @@ impl Mempool {
             returned_blocks: VecDeque::new(),
             cmt_block: None,
             addr: addr,
+            codes_for_encoding: codes_for_encoding,
+            codes_for_decoding: codes_for_decoding,
         } 
     }
 
@@ -64,57 +72,33 @@ impl Mempool {
         self.returned_blocks.push_back(block);
     }
 
+
     // TODO currently we ask the block to give us random chunks
-    pub fn sample_cmt(&mut self, sample_idx: Vec<u32>) -> (CMTH256, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
-        let mut hash = CMTH256::default();
-        let (symbols, idx) = match &self.cmt_block {
+    pub fn sample_cmt(&mut self, sample_idx: Vec<u32>) -> (BlockHeader, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
+        match &self.cmt_block {
             None => panic!("I don't have cmt block"),
             Some(cmt_block) => {
                 info!("{:?} sample cmt of size {}", self.addr, sample_idx.len());
-                hash = cmt_block.block_header.merkle_root_hash;
-                let (symbols_1, idx_1) = cmt_block.sampling_to_decode(3 as u32);
-                info!("idx1 {:?}", idx_1);
-                info!("symbols_1 {:?}", symbols_1);
-                
+                //info!("{:?} header {:?}", self.addr, cmt_block.block_header);
+                //info!("{:?} transactions {:?}", self.addr, cmt_block.transactions);
+
 
                 let (mut symbols, mut idx) = cmt_block.sampling_to_decode(1000 as u32); //sample_idx.len()
-                info!("idx {:?}", idx);
-                info!("symbols {:?}", symbols);
-                info!("{:?} symbols len {}", self.addr, symbols[0].len());
-                info!("{:?} idx len {}", self.addr, idx[0].len());
-
-                // since there are only one layer
-                let mut j = 0;
-                for i in &idx_1[0] {
-                    if idx[0].contains(&i) {
-                        //
-                    } else {
-                        idx[0].push(*i);
-                        symbols[0].push(symbols_1[0][j]);
-                    }
-                    j += 1;
-                }
-                info!("new idx {:?}", idx);
-                info!("new symbols {:?}", symbols);
-
-
+                //info!("idx {:?}", idx);
+                //info!("symbols {:?}", symbols);
                 // tests 
-                let k_set: Vec<u64> = vec![16];
-                let (codes_for_encoding, codes_for_decoding) = read_codes(k_set);
-                info!("{:?} after reading code, len {} {}", self.addr, codes_for_encoding.len(), codes_for_decoding.len());
-                info!("{:?} before constructing tree decoder", self.addr);
-                let mut decoder: TreeDecoder = TreeDecoder::new(codes_for_decoding.to_vec(), &cmt_block.block_header.coded_merkle_roots_hashes);
-                info!("{:?}, treedecoder n {} height {}", self.addr, decoder.n, decoder.height);
-                match decoder.run_tree_decoder(symbols.clone(), idx.clone()) {
-                    Ok(()) => (),
-                    _ => info!("tree decoder error"),
-                };
-                info!("{:?} after calling tree decoder", self.addr);
-                (symbols, idx)
+                //info!("{:?} after reading code, len {} {}", self.addr, self.codes_for_encoding.len(), self.codes_for_decoding.len());
+                //info!("{:?} before constructing tree decoder", self.addr);
+                //let mut decoder: TreeDecoder = TreeDecoder::new(self.codes_for_decoding.to_vec(), &cmt_block.block_header.coded_merkle_roots_hashes);
+                //info!("{:?}, treedecoder n {} height {}", self.addr, decoder.n, decoder.height);
+                //match decoder.run_tree_decoder(symbols.clone(), idx.clone()) {
+                    //Ok(()) => (),
+                    //_ => info!("tree decoder error"),
+                //};
+                //info!("{:?} after calling tree decoder", self.addr);
+                (cmt_block.block_header.clone(), symbols, idx)
             }
-        };
-
-        (hash, symbols, idx)
+        }
     }
 
     // currently a hack, need to combine with sample_cmt
@@ -134,31 +118,59 @@ impl Mempool {
             time: 4u32,
             bits: 5.into(),
             nonce: 6u32,
-            coded_merkle_roots_hashes: vec![CMTH256::default(); 4],
+            coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
         };
         // CMT - propose block
         let t = "0100000001a6b97044d03da79c005b20ea9c0e1a6d9dc12d9f7b91a5911c9030a439eed8f5000000004948304502206e21798a42fae0e854281abd38bacd1aeed3ee3738d9e1446618c4571d1090db022100e2ac980643b0b82c0e88ffdfec6b64e3e6ba35e7ba5fdd7d5d6cc8d25c6b241501ffffffff0100f2052a010000001976a914404371705fa9bd789a2fcd52d2c580b65d35549d88ac00000000";
-        let transaction_size = String::from(t).len();
-        info!("{:?} transaction_size {:?}", self.addr, transaction_size);
 
-        let num_transactions = BLOCK_SIZE / (transaction_size as u64);
-        info!("{:?} num_transactions {:?}", self.addr, num_transactions);
+        //let transaction_size = String::from(t).len();
+        //info!("{:?} transaction_size {:?}", self.addr, transaction_size);
 
-        let transactions: Vec<CMTTransaction> = vec![t.into();num_transactions as usize];
+        if self.transactions.len() == 0 {
+            info!("mempool no transation {:?}", self.addr); 
+        }
+
+        let mut transactions: Vec<Transaction> = Vec::new();
+        for _ in 0..self.block_size {
+            let tx = self.transactions.pop_front().expect("mempool prepare block");
+            transactions.push(tx);
+        }
+
+        info!("{:?} transactions {:?}", self.addr, transactions); 
+        let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
+        info!("{:?} trans_byte size {:?}", self.addr, trans_byte.len()); 
+
+
+        //let num_transactions = BLOCK_SIZE / (transaction_size as u64);
+        //info!("{:?} num_transactions {:?}", self.addr, num_transactions);
+
+        //let transactions: Vec<Transaction> = vec![t.into();num_transactions as usize];
         
         // number of systematic symbols for the codes on the four layers of CMT
-        let k_set: Vec<u64> = vec![16];
-        let (codes_for_encoding, codes_for_decoding) = read_codes(k_set);
-        info!("num code {:?} Code len {}", codes_for_encoding.len(), codes_for_encoding[0].symbols.len()); 
+        // info!("num code {:?} Code len {}", self.codes_for_encoding.len(), self.codes_for_encoding[0].symbols.len()); 
+        //for i in 0..(codes_for_encoding.len()-1) {
+            //info!("codes level {} parity len {} inner len {} {}", 
+                  //i, codes_for_encoding[i].parities.len(), 
+                  //codes_for_encoding[i].parities[0].len(),
+                  //codes_for_encoding[i].parities[100].len());
+            //info!("codes level {} symbol len {} inner len {} {}", 
+                  //i, codes_for_encoding[i].symbols.len(),
+                  //codes_for_encoding[i].symbols[0].len(),
+                  //codes_for_encoding[i].symbols[100].len());
+        //}
+
         let block: CMTBlock = CMTBlock::new(
             header.clone(), 
             &transactions, 
             BLOCK_SIZE as usize, 
             HEADER_SIZE, 
-            &codes_for_encoding, 
-            vec![true; codes_for_encoding.len()]);
+            &self.codes_for_encoding, 
+            vec![true; self.codes_for_encoding.len()]);
+
+        //info!("codes_for_encoding.len() {}", self.codes_for_encoding.len());
+
+        let (mut symbols, mut idx) = block.sampling_to_decode(1000 as u32); //sample_idx.len()
         
-        info!("{:?} after create CMT block", self.addr);
         self.cmt_block = Some(block);
         return header;
     }
@@ -179,7 +191,7 @@ impl Mempool {
 
         return Some(Block {
             header: Header::default(),
-            transactions: transactions,
+            transactions: vec![],
         });
 
     }

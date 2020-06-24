@@ -206,6 +206,14 @@ impl ApiServer {
                             };
                             respond_result!(request, true, format!("{:?}", receipt));
                         },
+                        "/contract/reset-chain" => {
+                            info!("reset-chain");
+                            let handle = Handle {
+                                message: Message::ResetChain(0),
+                                answer_channel: None,
+                            };
+                            rc.contract_channel.send(handle);
+                        }
                         "/contract/count-scale-nodes" => {
                             // USE CALLBACK
                             let (answer_tx, answer_rx) = channel::bounded(1);
@@ -241,7 +249,7 @@ impl ApiServer {
                         "/contract/get-curr-state" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: Message::GetCurrState,
+                                message: Message::GetCurrState(0),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);
