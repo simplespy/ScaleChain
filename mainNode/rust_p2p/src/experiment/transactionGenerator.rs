@@ -134,6 +134,7 @@ impl TransactionGenerator {
     fn create_transaction(&self)-> Transaction {
         let tx = Transaction::default();
         info!("transaction {:?}", tx);
+        tx
         //let input = Input {
             //tx_hash: H256::new(), 
             //index: 0,
@@ -160,17 +161,16 @@ impl TransactionGenerator {
 
     fn generate_transaction_from_history(&self) -> Vec<Transaction> {
         // please change
-        vec![self.create_transaction()]
-    }
+
         //let mut file = File::create("gas_history.csv").unwrap();
-        //let mut transactions: Vec<Transaction> = vec![];
-        //let request_url = format!("http://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock={start}&endblock={end}&sort=asc&apikey={apikey}&page={page}&offset={offset}",
-                                  //address = "0x06012c8cf97bead5deae237070f9587f8e7a266d",//"0x732de7495deecae6424c3fc3c46e47d6b4c5374e",
-                                  //start = 5752558,
-                                  //end = 9463322,
-                                  //apikey = "UGEFW13C4HVZ9GGH5GWIRHQHYYPYKX7FCX",
-                                  //page = 1,
-                                  //offset = 1000);
+        let mut transactions: Vec<Transaction> = vec![];
+        let request_url = format!("http://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock={start}&endblock={end}&sort=asc&apikey={apikey}&page={page}&offset={offset}",
+                                  address = "0x06012c8cf97bead5deae237070f9587f8e7a266d",//"0x732de7495deecae6424c3fc3c46e47d6b4c5374e",
+                                  start = 5752558,
+                                  end = 9463322,
+                                  apikey = "UGEFW13C4HVZ9GGH5GWIRHQHYYPYKX7FCX",
+                                  page = 1,
+                                  offset = 1000);
         ////let request_url = format!("http://api.etherscan.io/api?module=account&action=txlist&address={address}&startblock={start}&endblock={end}&sort=asc&apikey={apikey}&page={page}&offset={offset}",
                                   ////address = "0x1985365e9f78359a9B6AD760e32412f4a445E862",
                                   ////start = 8752558,
@@ -179,21 +179,27 @@ impl TransactionGenerator {
                                   ////page = 1,
                                   ////offset = 1000);
         //println!("{:?}", request_url);
-        //let response = requests::get(request_url).unwrap();
-        //let data = response.json().unwrap();
-        //let txs = data["result"].clone();
-        //let mut i = 0;
-        //for tx in txs.members() {
-            //let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
+        let response = requests::get(request_url).unwrap();
+        let data = response.json().unwrap();
+        let txs = data["result"].clone();
+        let mut i = 0;
+        for tx in txs.members() {
+            let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
 
-            //if isError == 0 && tx["to"].as_str().unwrap() == "0x06012c8cf97bead5deae237070f9587f8e7a266d" {
-            ////if isError == 0 && tx["to"].as_str().unwrap() == "0x1985365e9f78359a9b6ad760e32412f4a445e862" {
+            if isError == 0 && tx["to"].as_str().unwrap() == "0x06012c8cf97bead5deae237070f9587f8e7a266d" {
+                ////if isError == 0 && tx["to"].as_str().unwrap() == "0x1985365e9f78359a9b6ad760e32412f4a445e862" {
+
+
+                let mut transaction = Transaction::default();
+                let content = String::from(tx["input"].as_str().unwrap()).replace("0x", "");
+                let mut txinput = TransactionInput::coinbase(Bytes::from(hex::decode(content.as_str()).expect("decode error")));
+                transaction.inputs.push(txinput);
                 //let tx_hash = String::from(tx["hash"].as_str().unwrap());
                 //let content = String::from(tx["input"].as_str().unwrap()).replace("0x", "");
                 //let address = String::from(tx["from"].as_str().unwrap());
                 //let gas_used = String::from(tx["gas"].as_str().unwrap());
                 //let gas_used = usize::from_str_radix(&gas_used, 10).unwrap();
-                //i += 1;
+                i += 1;
                 //file.write_all(format!("{},{}\n",i,gas_used).as_bytes());
                 //let mut tx = Transaction{
                     //inputs: vec![Input {
@@ -210,11 +216,11 @@ impl TransactionGenerator {
                     //hash: H256::default()
                 //};
                 //tx.update_hash();
-                //transactions.push(tx);
-            //}
-        //}
-        //println!("generate {} txs from history", transactions.len());
-        //return transactions;
+                transactions.push(transaction);
+            }
+        }
+        println!("generate {} txs from history", transactions.len());
+        return transactions;
 
-    /*}*/
+    }
 }
