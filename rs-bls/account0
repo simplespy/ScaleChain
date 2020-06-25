@@ -1,0 +1,6 @@
+{
+	"rpc_url": "http://localhost:7545",
+	"contract_address": "0x9B6eBA846e34ea874a2173a7C2fcC4C55c6A8b58",
+	"address": "0xe75aF6708a0dA274a96b0e5003251BF89C0b4509",
+  "private_key": "5d2e10d7c5a3e17607f5efcc55b6f4380b28b1d3d2456c27dc89a2f5e5d73b1a"
+}
