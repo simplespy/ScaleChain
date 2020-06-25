@@ -64,9 +64,9 @@ pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U25
 }
 
 
-pub fn _encode_submitVote(block: String, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {}", block, sigx, sigy, bitset);
-    //println!("command {}", command.clone());
+pub fn _encode_submitVote(block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
+    let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {} -p {} -p {}", block, sid, bid, sigx, sigy, bitset);
+    println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();

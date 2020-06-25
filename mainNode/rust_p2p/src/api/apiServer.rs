@@ -337,9 +337,15 @@ impl ApiServer {
                         "/contract/submit-vote" => {
 
                             let (answer_tx, answer_rx) = channel::bounded(1);
-                            //let id = id.parse().unwrap();
+                            let header = super::contract::utils::_generate_random_header();
+                            let (sigx, sigy) = super::contract::utils::_sign_bls(header.clone(), "node1".to_string());
+                            let (sigx2, sigy2) = super::contract::utils::_sign_bls(header.clone(), "node2".to_string());
+                            let (sigx3, sigy3) = super::contract::utils::_sign_bls(header.clone(), "node3".to_string());
+                            let (sigx, sigy) = super::contract::utils::_aggregate_sig(sigx, sigy, sigx2, sigy2);
+                            let (sigx, sigy) = super::contract::utils::_aggregate_sig(sigx, sigy, sigx3, sigy3);
+                            //  self.submit_vote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26))
                             let handle = Handle {
-                                message: Message::SubmitVote("hello".to_string(), U256::from(26),  U256::from(26), U256::from(26)),
+                                message: Message::SubmitVote("deadbeef".to_string(), U256::from(0), U256::from(5), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26)),
                                 answer_channel: Some(answer_tx),
                             };
                             rc.contract_channel.send(handle);

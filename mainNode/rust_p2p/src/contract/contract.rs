@@ -103,14 +103,15 @@ impl Contract {
                                 Message::SendBlock(block) => {
                                     self.send_block(block);
                                 },
-                                Message::SubmitVote(header, sigx, sigy, bitset) => {
-                                    let header = _generate_random_header();
-                                    let (sigx, sigy) = _sign_bls(header.clone(), "node1".to_string());
-                                    let (sigx2, sigy2) = _sign_bls(header.clone(), "node2".to_string());
-                                    let (sigx3, sigy3) = _sign_bls(header.clone(), "node3".to_string());
-                                    let (sigx, sigy) = _aggregate_sig(sigx, sigy, sigx2, sigy2);
-                                    let (sigx, sigy) = _aggregate_sig(sigx, sigy, sigx3, sigy3);
-                                    self.submit_vote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26))
+                                Message::SubmitVote(header, sid, bid, sigx, sigy, bitset) => {
+                                    self.submit_vote(header, sid, bid, sigx, sigy, bitset);
+                                   // let header = _generate_random_header();
+                                   // let (sigx, sigy) = _sign_bls(header.clone(), "node1".to_string());
+                                   // let (sigx2, sigy2) = _sign_bls(header.clone(), "node2".to_string());
+                                  //  let (sigx3, sigy3) = _sign_bls(header.clone(), "node3".to_string());
+                                  //  let (sigx, sigy) = _aggregate_sig(sigx, sigy, sigx2, sigy2);
+                                 //   let (sigx, sigy) = _aggregate_sig(sigx, sigy, sigx3, sigy3);
+                                  //  self.submit_vote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26))
                                 },
                                 Message::AddScaleNode(id, ip) => {
                                     let file = File::open(format!("accounts/account{}", id)).unwrap();
@@ -220,19 +221,19 @@ impl Contract {
         }
     }
 
-    pub fn submit_vote(&self, header: String, sigx: U256, sigy: U256, bitset: U256) {
+    pub fn submit_vote(&self, str_block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) {
         info!("before submit_vote");
         let nonce = self._transaction_count();
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
-        let function_abi = _encode_submitVote(header, sigx, sigy, bitset);
-        //let gas = self._estimate_gas(function_abi.clone());
+        let function_abi = _encode_submitVote(str_block, sid, bid, sigx, sigy, bitset);
+       // let gas = self._estimate_gas(function_abi.clone());
         //  println!("{:?}", gas);
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
-            gas: ethereum_types::U256::from(750000),
+            gas: ethereum_types::U256::from(950000),
             data: function_abi
         };
 
@@ -240,7 +241,7 @@ impl Contract {
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         let tx_hash = self._send_transaction(signed_tx);
-        info!("after  _send_transaction");
+        //info!("after  _send_transaction");
         if self.get_tx_receipt(tx_hash) {
             println!("tx_hash = {:?}", tx_hash);
         }

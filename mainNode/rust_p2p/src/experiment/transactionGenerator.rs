@@ -136,7 +136,7 @@ impl TransactionGenerator {
         let mut rng = rand::thread_rng();
         let bytes_size = 128;
         let input = TransactionInput {
-            previous_output: OutPoint::random(),
+            previous_output: OutPoint::default(),
             script_sig: Bytes::new_with_len(bytes_size), //magic
             sequence: 0,
             script_witness: vec![],

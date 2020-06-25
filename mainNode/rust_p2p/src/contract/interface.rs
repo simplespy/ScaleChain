@@ -34,7 +34,7 @@ pub enum Message {
     GetAll(([u8;32], usize, usize)), //inithash, start, end
     SyncChain,
     EstimateGas(Block),
-    SubmitVote(String, U256, U256, U256),
+    SubmitVote(String, U256, U256, U256, U256, U256),
     ResetChain(usize)
 }
 

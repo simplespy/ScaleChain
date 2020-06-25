@@ -316,7 +316,7 @@ impl Performer {
                                     let header: String = hex::encode(&header);
                                     //utils::_generate_random_header();
                                     let (sigx, sigy) = utils::_sign_bls(header.clone(), keyfile);
-                                    let response_msg = Message::MySign(header.clone(), sigx.clone(), sigy.clone(), scaleid);
+                                    let response_msg = Message::MySign(header.clone(), 0, block_id, sigx.clone(), sigy.clone(), scaleid);
                                     let signal = ServerSignal::ServerBroadcast(response_msg);
                                     broadcaster.send(signal);
 
@@ -338,7 +338,7 @@ impl Performer {
                         });
                     }
                 },
-                Message::MySign(header , sigx, sigy, scale_id) => {
+                Message::MySign(header , sid, bid, sigx, sigy, scale_id) => {
                     info!("{:?} receive MySign message from node {:?}", self.addr, scale_id);
                     // send to spawned thread like ScaleReqChunksReply
 
@@ -358,7 +358,7 @@ impl Performer {
                         if utils::_count_sig(bitset.clone()) > self.threshold {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: ContractMessage::SubmitVote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
+                                message: ContractMessage::SubmitVote(header, U256::from(sid), U256::from(bid), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
                                 answer_channel: Some(answer_tx),
                             };
                             self.contract_handler.send(handle);

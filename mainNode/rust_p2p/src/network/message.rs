@@ -30,7 +30,7 @@ pub enum Message {
     ProposeBlock((Vec<u8>, usize)), //BlockHeader block_id //sender is client
     ScaleReqChunks(Vec<u32>), //(id), // sender is scalenode
     ScaleReqChunksReply(ChunkReply),
-    MySign(String, String, String, usize),
+    MySign(String, usize, usize, String, String, usize),
     ScaleGetAllChunks(ContractState), // blockheader
     ScaleGetAllChunksReply((ChunkReply, usize)),
 }
