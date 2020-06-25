@@ -169,7 +169,8 @@ impl Contract {
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
-            gas: _convert_u256(gas),
+           //gas: _convert_u256(gas),
+            gas: ethereum_types::U256::from(750000),
             data: function_abi
         };
 
@@ -390,7 +391,7 @@ fn main() {
        let (sigx, sigy) = _aggregate_sig(sigx1, sigy1, sigx2, sigy2);
 
     //   println!("signature = {:?}, {:?}", sigx, sigy);
-     //  contract.submit_vote("deadbeef".to_string(), U256::from(0), U256::from(bid + 1), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(6));
+       contract.submit_vote("deadbeef".to_string(), U256::from(0), U256::from(bid + 1), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(6));
       //  contract.reset_chain(0);
        let bid = contract._get_blk_id(0);
 
@@ -398,7 +399,7 @@ fn main() {
        println!("block id = {}", bid);
 
 
-    println!("{:?}", contract._get_pub_key(account_2.address));
+   // println!("{:?}", contract._get_pub_key(account_2.address));
 
   //  println!("{:?}",_count_sig(26));
    /* let mut hasher = Sha256::new();
