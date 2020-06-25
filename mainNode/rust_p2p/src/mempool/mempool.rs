@@ -45,7 +45,7 @@ impl Mempool {
         
         Mempool {
             transactions: VecDeque::new(), 
-            block_size: 1,
+            block_size: BLOCK_SIZE as usize, // in bytes
             contract_handler: contract_handler,
             schedule_handler: schedule_handler,
             returned_blocks: VecDeque::new(),
@@ -56,9 +56,20 @@ impl Mempool {
         } 
     }
 
+    pub fn transaction_size_in_bytes(&self) -> usize {
+        let mut trans_byte = self.transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
+        let mut total_size = 0;
+        for tx in &trans_byte {
+            total_size +=  tx.len();
+        }
+        total_size
+    }
+
     pub fn change_mempool_size(&mut self, size: usize) {
         self.block_size = size;
-        if self.transactions.len() >= self.block_size {
+        
+
+        if self.transaction_size_in_bytes() >= self.block_size {
             self.send_block();
         }
     }
@@ -109,7 +120,11 @@ impl Mempool {
         }
     }
 
-    pub fn prepare_cmt_block(&mut self) -> BlockHeader {
+    pub fn prepare_cmt_block(&mut self) -> Option<BlockHeader> {
+        if self.transactions.len() == 0 {
+            return None;
+        }
+
         // get CMT
         let header = BlockHeader {
             version: 1,
@@ -121,25 +136,46 @@ impl Mempool {
             coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
         };
         // CMT - propose block
-        let t = "0100000001a6b97044d03da79c005b20ea9c0e1a6d9dc12d9f7b91a5911c9030a439eed8f5000000004948304502206e21798a42fae0e854281abd38bacd1aeed3ee3738d9e1446618c4571d1090db022100e2ac980643b0b82c0e88ffdfec6b64e3e6ba35e7ba5fdd7d5d6cc8d25c6b241501ffffffff0100f2052a010000001976a914404371705fa9bd789a2fcd52d2c580b65d35549d88ac00000000";
-
         //let transaction_size = String::from(t).len();
         //info!("{:?} transaction_size {:?}", self.addr, transaction_size);
 
-        if self.transactions.len() == 0 {
-            info!("mempool no transation {:?}", self.addr); 
-        }
-
         let mut transactions: Vec<Transaction> = Vec::new();
-        for _ in 0..self.block_size {
-            let tx = self.transactions.pop_front().expect("mempool prepare block");
-            transactions.push(tx);
+        let tx_bytes_size = self.transaction_size_in_bytes();
+
+        // need to truncate 
+        info!("num transaction {}", self.transactions.len());
+        info!("tx_bytes_size {} self.block_size {}", tx_bytes_size , self.block_size);
+        if tx_bytes_size > self.block_size {
+            let mut s = 0;
+            for i in 0..self.transactions.len() {
+                s += self.transactions[i].bytes().len();
+                if s > self.block_size {
+                    if self.transactions.len() == 0 {
+                        panic!("single transaction too large, block size is insufficient");
+                    }
+                    break;
+                } else {
+                    transactions.push(self.transactions[i].clone());
+                }
+            }
+
+            for _ in 0..transactions.len() {
+                self.transactions.pop_front();
+            }
+        } else {
+            for tx in &self.transactions {
+                transactions.push(tx.clone());
+            }
+            self.transactions.clear();
+
         }
 
-        info!("{:?} transactions {:?}", self.addr, transactions); 
         let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
-        info!("{:?} trans_byte size {:?}", self.addr, trans_byte.len()); 
-
+        let mut total_size = 0;
+        for tx in &trans_byte {
+            total_size +=  tx.len();
+        }
+        info!("{:?} total_size {}  hello {:?}", self.addr, transactions.len(), total_size); 
 
         //let num_transactions = BLOCK_SIZE / (transaction_size as u64);
         //info!("{:?} num_transactions {:?}", self.addr, num_transactions);
@@ -172,7 +208,7 @@ impl Mempool {
         let (mut symbols, mut idx) = block.sampling_to_decode(1000 as u32); //sample_idx.len()
         
         self.cmt_block = Some(block);
-        return header;
+        return Some(header);
     }
 
     pub fn prepare_block(&mut self) -> Option<Block> {
@@ -227,8 +263,10 @@ impl Mempool {
 
     pub fn insert(&mut self, transaction: Transaction) {
         self.transactions.push_back(transaction);
-        if self.transactions.len() >= self.block_size {
-            //self.send_block();
+        let tx_bytes_size = self.transaction_size_in_bytes();
+
+        // need to truncate 
+        if tx_bytes_size > self.block_size {
             self.schedule_handler.send(None);
         }
     }

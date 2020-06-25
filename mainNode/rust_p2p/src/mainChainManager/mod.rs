@@ -60,7 +60,7 @@ fn collect_cmt_chunks(job_manager: JobManager)
         match chunk_receiver.recv() {
             // accumulate chunks 
             Ok(chunk) => {
-                info!("{:?} get all receive chunks", job_manager.addr);
+                info!("{:?} get cmt chunks", job_manager.addr);
                 let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();;
                 let mut hash  = [0u8; 32];
                 let header_hex: String = hex::encode(&chunk.header);
@@ -181,6 +181,7 @@ impl Manager {
             let mut ready_blocks: HashMap<usize, ContractState> = HashMap::new();
             loop {
                 let mut rm: Vec<usize> = vec![];
+                // check if any threads finish
                 for (block_id, block_sink) in &blocks_sink {
                     match block_sink.try_recv() {
                         Err(TryRecvError::Empty) => (),
@@ -189,6 +190,8 @@ impl Manager {
                             // a thread has finished processing cmt
                             match result {
                                 Ok(sblock) => {
+
+                                    info!("{:?} cmt finishes", self.addr);
                                     rm.push(*block_id);
                                     let mut sblock_db = self.block_db.lock().unwrap();
                                     sblock_db.insert_sblock(*block_id, sblock);
@@ -233,7 +236,7 @@ impl Manager {
                         }
                     }
                 }
-                info!("{:?} pulling for mainchain update", self.addr);
+                //info!("{:?} pulling for mainchain update", self.addr);
                 let (answer_tx, answer_rx) = channel::bounded(1);
                 let handle = Handle {
                     message: ContractMessage::GetCurrState(0),
@@ -260,7 +263,7 @@ impl Manager {
                                                 if self.chunk_senders.contains_key(&state.block_id) {
                                                     continue;
                                                 } 
-                                                info!("manager found new state {:?} tip_state {:?}", state, tip_state);
+                                                info!("mainchain new state {:?} tip_state {:?}", state, tip_state);
 
                                                 // get block from scale node network
                                                 let (chunk_sender, chunk_receiver) = crossbeam::channel::unbounded();

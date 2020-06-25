@@ -221,6 +221,7 @@ impl Contract {
     }
 
     pub fn submit_vote(&self, header: String, sigx: U256, sigy: U256, bitset: U256) {
+        info!("before submit_vote");
         let nonce = self._transaction_count();
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let function_abi = _encode_submitVote(header, sigx, sigy, bitset);
@@ -239,6 +240,7 @@ impl Contract {
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         let tx_hash = self._send_transaction(signed_tx);
+        info!("after  _send_transaction");
         if self.get_tx_receipt(tx_hash) {
             println!("tx_hash = {:?}", tx_hash);
         }

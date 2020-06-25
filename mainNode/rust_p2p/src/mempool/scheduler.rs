@@ -73,7 +73,7 @@ impl Scheduler {
                                 }
                             },
                             Some(token) => {
-                                //info!("reiceive a token, propose a block");
+                                info!("reiceive a token, propose a block");
                                 self.token = Some(token);
                                 self.propose_block();
                             }
@@ -91,7 +91,10 @@ impl Scheduler {
         if let Some(ref mut token) = self.token {
             info!("{:?} scheduler propose block", self.socket);
             let mut mempool = self.mempool.lock().unwrap();
-            let header = mempool.prepare_cmt_block();
+            let header = match mempool.prepare_cmt_block() {
+                Some(h) => h,
+                None => return false,
+            };
             drop(mempool);
             let header_bytes = serialize(&header);
 
@@ -115,7 +118,7 @@ impl Scheduler {
 
             // Pass token
             info!("{:?} scheduler sleep", self.socket);
-            let sleep_time = time::Duration::from_millis(500);
+            let sleep_time = time::Duration::from_millis(10000);
             thread::sleep(sleep_time);
             info!("{:?} scheduler waked up", self.socket);
             if token.ring_size >= 2 {

@@ -362,6 +362,7 @@ impl Performer {
                                 answer_channel: Some(answer_tx),
                             };
                             self.contract_handler.send(handle);
+                            info!("smart contarct update");
                         }
                     }
                 },

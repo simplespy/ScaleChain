@@ -12,6 +12,7 @@ use chain::transaction::{Transaction, TransactionInput, TransactionOutput, OutPo
 use primitives::bytes::Bytes;
 
 use requests::{ToJson};
+use rand::Rng;
 
 pub enum TxGenSignal {
     Start,
@@ -132,29 +133,29 @@ impl TransactionGenerator {
     }
 
     fn create_transaction(&self)-> Transaction {
-        let tx = Transaction::default();
-        info!("transaction {:?}", tx);
-        tx
-        //let input = Input {
-            //tx_hash: H256::new(), 
-            //index: 0,
-            //unlock: H256::new(),
-            //content: Vec::new()
-        //};
+        let mut rng = rand::thread_rng();
+        let bytes_size = 128;
+        let input = TransactionInput {
+            previous_output: OutPoint::random(),
+            script_sig: Bytes::new_with_len(bytes_size), //magic
+            sequence: 0,
+            script_witness: vec![],
+        };
 
-        //let output = Output {
-            //address: self.my_addr[0],
-            //value: 10,
-        //};
-        //let mut transaction = Transaction {
-            //inputs: vec![input], 
-            //outputs: vec![output], 
-            //is_coinbase: true,
-            //hash: H256::default(), 
-        //};
-        //transaction.update_hash();
-        
-        //transaction
+
+        let output = TransactionOutput {
+            value: rng.gen(),
+            script_pubkey: Bytes::new_with_len(bytes_size),
+        };
+
+
+        let tx = Transaction {
+            version: 0,
+            inputs: vec![input],
+            outputs: vec![output] ,
+            lock_time: rng.gen(),
+        };
+        tx
     }
 
 
