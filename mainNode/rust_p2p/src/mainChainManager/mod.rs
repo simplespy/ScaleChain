@@ -182,6 +182,7 @@ impl Manager {
             loop {
                 let mut rm: Vec<usize> = vec![];
                 // check if any threads finish
+                info!("{:?} hello1", self.addr);
                 for (block_id, block_sink) in &blocks_sink {
                     match block_sink.try_recv() {
                         Err(TryRecvError::Empty) => (),
@@ -225,7 +226,7 @@ impl Manager {
                 for block_id in &rm {
                     blocks_sink.remove(block_id);
                 }
-
+                info!("{:?} hello2", self.addr);
                 match self.job_sink.try_recv() {
                     Err(TryRecvError::Empty) => (),
                     Err(TryRecvError::Disconnected) => panic!("manager sink broken"),
@@ -236,7 +237,10 @@ impl Manager {
                         }
                     }
                 }
-                //info!("{:?} pulling for mainchain update", self.addr);
+
+                info!("{:?} hello3 sleep", self.addr);// every 1 sec pull mainchain state
+                let sleep_time = time::Duration::from_millis(1000000000);
+                thread::sleep(sleep_time);
                 let (answer_tx, answer_rx) = channel::bounded(1);
                 let handle = Handle {
                     message: ContractMessage::GetCurrState(0),
@@ -297,9 +301,7 @@ impl Manager {
                     },
                     Err(e) => panic!("performer contract channel broke"), 
                 }
-                // every 1 sec pull mainchain state
-                let sleep_time = time::Duration::from_millis(1000);
-                thread::sleep(sleep_time);
+                
             }
         });
     }

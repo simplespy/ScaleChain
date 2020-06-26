@@ -197,7 +197,14 @@ fn main() {
         }
         token = Some(tok);
     }
-    let scheduler = Scheduler::new(listen_socket.clone(), token, mempool.clone(), server_control_sender.clone(), schedule_handle_receiver.clone(), blockchain.clone());
+    let scheduler = Scheduler::new(
+        listen_socket.clone(), 
+        token, mempool.clone(), 
+        server_control_sender.clone(), 
+        schedule_handle_receiver.clone(), 
+        blockchain.clone(),
+        contract_handle_sender.clone()
+        );
     scheduler.start();
 
     contract.start();

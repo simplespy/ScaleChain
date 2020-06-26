@@ -137,6 +137,21 @@ pub fn _hash_message(message: &[u8], result: &mut [u8]) {
     hasher.result(result);
 }
 
+pub fn hash_header(message: &[u8], result: &mut [u8]) {
+    let mut hasher = Sha3::keccak256();
+    hasher.input(message);
+    hasher.result(result);
+}
+
+pub fn hash_header_hex(message: &[u8]) -> String {
+    let mut result: [u8; 32] = [0; 32];
+    let mut hasher = Sha3::keccak256();
+    hasher.input(message);
+    hasher.result(&mut result);
+    let hash_str = hex::encode(&result);
+    hash_str
+}
+
 pub fn _sign_block(block: &str, private_key: &[u8]) -> String {
     let mut hasher = Sha3::keccak256();
     hasher.input_str(block);

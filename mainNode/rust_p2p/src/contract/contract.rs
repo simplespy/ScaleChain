@@ -222,7 +222,7 @@ impl Contract {
     }
 
     pub fn submit_vote(&self, str_block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) {
-        info!("before submit_vote");
+        info!("{:?} submit vote", self.ip_addr);
         let nonce = self._transaction_count();
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let function_abi = _encode_submitVote(str_block, sid, bid, sigx, sigy, bitset);
@@ -484,10 +484,16 @@ impl Contract {
     }
 
     fn _get_curr_hash(&self, sid: usize) -> web3::types::H256 {
-        self.contract
+        match self.contract
             .query("getCurrentHash", (web3::types::U256::from(sid),), None, EthOption::default(), None)
             .wait()
-            .unwrap()
+        {
+            Ok(h) => h,
+            Err(e) => {
+                println!("_get_curr_hash recv ERROR");
+                web3::types::H256::default()
+            }
+        }
     }
 
     fn _get_curr_state(&self, sid: usize) -> ContractState {
@@ -538,10 +544,14 @@ impl Contract {
     }
 
     fn _transaction_receipt(&self, tx_hash: web3::types::H256) -> Option<TransactionReceipt> {
-        self.web3.eth()
+        match self.web3.eth()
             .transaction_receipt(tx_hash)
             .wait()
-            .unwrap()
+            {
+                Ok(t) => t,
+                Err(_) => None,
+            }
+            
     }
 
     fn _estimate_gas(&self, data: Vec<u8>) -> U256 {

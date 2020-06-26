@@ -21,6 +21,7 @@ use chain::decoder::{Symbol};
 use primitives::bytes::{Bytes};
 use ser::{deserialize, serialize};
 use std::net::{SocketAddr};
+use rand::Rng;
 
 pub struct Mempool {
     transactions: VecDeque<Transaction>,
@@ -89,10 +90,9 @@ impl Mempool {
         match &self.cmt_block {
             None => panic!("I don't have cmt block"),
             Some(cmt_block) => {
-                info!("{:?} sample cmt of size {}", self.addr, sample_idx.len());
+                //info!("{:?} sample cmt of size {}", self.addr, sample_idx.len());
                 //info!("{:?} header {:?}", self.addr, cmt_block.block_header);
                 //info!("{:?} transactions {:?}", self.addr, cmt_block.transactions);
-
 
                 let (mut symbols, mut idx) = cmt_block.sampling_to_decode(1000 as u32); //sample_idx.len()
                 //info!("idx {:?}", idx);
@@ -126,13 +126,14 @@ impl Mempool {
         }
 
         // get CMT
+        let mut rng = rand::thread_rng();
         let header = BlockHeader {
             version: 1,
             previous_header_hash: CMTH256::default(),
             merkle_root_hash: CMTH256::default(),
             time: 4u32,
             bits: 5.into(),
-            nonce: 6u32,
+            nonce: rng.gen(),
             coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
         };
         // CMT - propose block
@@ -143,8 +144,8 @@ impl Mempool {
         let tx_bytes_size = self.transaction_size_in_bytes();
 
         // need to truncate 
-        info!("num transaction {}", self.transactions.len());
-        info!("tx_bytes_size {} self.block_size {}", tx_bytes_size , self.block_size);
+        //info!("num transaction {}", self.transactions.len());
+        //info!("tx_bytes_size {} self.block_size {}", tx_bytes_size , self.block_size);
         if tx_bytes_size > self.block_size {
             let mut s = 0;
             for i in 0..self.transactions.len() {
@@ -203,12 +204,16 @@ impl Mempool {
             &self.codes_for_encoding, 
             vec![true; self.codes_for_encoding.len()]);
 
+
+
         //info!("codes_for_encoding.len() {}", self.codes_for_encoding.len());
 
-        let (mut symbols, mut idx) = block.sampling_to_decode(1000 as u32); //sample_idx.len()
+        //let (mut symbols, mut idx) = block.sampling_to_decode(1000 as u32); //sample_idx.len()
+        let cmt_header = block.block_header.clone();
         
         self.cmt_block = Some(block);
-        return Some(header);
+
+        return Some(cmt_header);
     }
 
     pub fn prepare_block(&mut self) -> Option<Block> {
@@ -264,6 +269,7 @@ impl Mempool {
     pub fn insert(&mut self, transaction: Transaction) {
         self.transactions.push_back(transaction);
         let tx_bytes_size = self.transaction_size_in_bytes();
+        info!("insert transaction");
 
         // need to truncate 
         if tx_bytes_size > self.block_size {

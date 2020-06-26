@@ -1,13 +1,22 @@
 #!/bin/bash
 
-num_tx=$1
-cmd0="localhost:41004/transaction-generator/step?step=${num_tx}"
-cmd1="localhost:41005/transaction-generator/step?step=${num_tx}"
-curl $cmd0
-curl $cmd1
+# roughly a block size
+num_tx=16
+
+cmd_n4_tx="localhost:41004/transaction-generator/step?step=${num_tx}"
+cmd_n5_tx="localhost:41005/transaction-generator/step?step=${num_tx}"
+cmd_get_state="localhost:41001/contract/get-curr-state"
+
+
+
 
 while true; do
-	cmd2="localhost:41000/contract/get-curr-state"
-	curl $cmd2
+	# node 4 send transactions
+	curl $cmd_n4_tx
+	curl $cmd_get_state
+
+	# node 5 send transactions
 	sleep 10
+	curl $cmd_n5_tx
+	curl $cmd_get_state
 done

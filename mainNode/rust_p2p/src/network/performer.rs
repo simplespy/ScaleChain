@@ -269,7 +269,8 @@ impl Performer {
                 // CMT worker thread
                 Message::ProposeBlock((header, block_id)) => {
                     if self.scale_id > 0 {
-                        info!("{:?} receive ProposeBlock", self.addr);
+                        let hash_str = utils::hash_header_hex(&header);
+                        info!("{:?} receive ProposeBlock: header hash: {:?}", self.addr, hash_str);
                         let local_addr = self.addr.clone();
                         let peer_handle = task.peer.unwrap();
                         let proposer_addr = peer_handle.addr;
@@ -301,7 +302,6 @@ impl Performer {
                             loop {
                                 match rx.recv() {
                                     Ok(chunk_reply) => {
-                                        info!("{:?}, receive ScaleReqChunksreply", local_addr); 
                                         let mut local_db = db.lock().unwrap();
                                         let header_cmt: BlockHeader = deserialize(&header.clone() as &[u8]).unwrap();
                                         // compute id
@@ -310,25 +310,28 @@ impl Performer {
                                     },
                                     Err(e) => info!("proposer error"),
                                 }
+
                                 if num_chunk > chunk_thresh {
-                                    info!("{:?} is ready to aggregate sign", local_addr);
+                                    
                                     // vote
-                                    let header: String = hex::encode(&header);
+                                    let header_str: String = hex::encode(&header);
                                     //utils::_generate_random_header();
-                                    let (sigx, sigy) = utils::_sign_bls(header.clone(), keyfile);
-                                    let response_msg = Message::MySign(header.clone(), 0, block_id, sigx.clone(), sigy.clone(), scaleid);
+                                    let (sigx, sigy) = utils::_sign_bls(header_str.clone(), keyfile);
+                                    let response_msg = Message::MySign(header_str.clone(), 0, block_id, sigx.clone(), sigy.clone(), scaleid);
                                     let signal = ServerSignal::ServerBroadcast(response_msg);
                                     broadcaster.send(signal);
-
+                                    
                                     let mut aggsig = local_aggsig.lock().unwrap();
-                                    if aggsig.get(&header).is_none() {
-                                        aggsig.insert(header.clone(),  (sigx.clone(), sigy.clone(), (1 << scaleid)));
+                                    if aggsig.get(&header_str).is_none() {
+                                        aggsig.insert(header_str.clone(),  (sigx.clone(), sigy.clone(), (1 << scaleid)));
+                                        info!("{:?} aggregate sign, bitset {}", local_addr, (1 << scaleid));
                                     }
                                     else {
-                                        let ( x, y, bitset) = aggsig.get(&header).unwrap();
+                                        let ( x, y, bitset) = aggsig.get(&header_str).unwrap();
                                         let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx, sigy);
                                         let bitset = bitset + (1 << scaleid);
-                                        aggsig.insert(header.clone(),  (sigx, sigy, bitset.clone()));
+                                        aggsig.insert(header_str.clone(),  (sigx, sigy, bitset.clone()));
+                                        info!("{:?} aggregate sign, bitset {}", local_addr, bitset.clone());
                                     }
                                     break;
                                 }
@@ -339,40 +342,61 @@ impl Performer {
                     }
                 },
                 Message::MySign(header , sid, bid, sigx, sigy, scale_id) => {
-                    info!("{:?} receive MySign message from node {:?}", self.addr, scale_id);
+                    if self.scale_id <= 0 {
+                        continue;
+                    }
+
+                    // new
+                    let decode_header = hex::decode(&header).unwrap();
+                    let header_hash_str = utils::hash_header_hex(&decode_header);
+                    let peer = task.peer.unwrap();
+                    info!("{:?} receive Mysign from {:?}: header hash: {:?}", self.addr, peer.addr,header_hash_str);
+                    let mut sigx = sigx;
+                    let mut sigy = sigy;
+                    //info!("{:?} receive MySign message from node {:?}.", self.addr, scale_id);
                     // send to spawned thread like ScaleReqChunksReply
 
                     let local_aggsig = self.agg_sig.clone();
                     let mut aggsig = local_aggsig.lock().unwrap();
 
                     if aggsig.get(&header).is_none() {
+                        info!("{:?} Mysign first seen header", self.addr);
                         aggsig.insert(header.clone(),  (sigx, sigy, (1 << scale_id)));
                     }
                     else {
-                        let ( x, y, bitset) = aggsig.get(&header).unwrap().clone();
+                        //changed
+                        let ( x, y, mut bitset) = aggsig.get(&header).unwrap().clone();
                         if (1 << scale_id) & bitset.clone() == 0 {
-                            let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx.clone(), sigy.clone());
-                            let bitset = bitset + (1 << scale_id);
+                            //info!("old bitste {}", bitset);
+                            let (sigx_t, sigy_t) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx.clone(), sigy.clone());
+                            sigx = sigx_t;
+                            sigy = sigy_t;
+                            bitset = bitset + (1 << scale_id);
                             aggsig.insert(header.clone(), (sigx.clone(), sigy.clone(), bitset.clone()));
                         }
-                        if utils::_count_sig(bitset.clone()) > self.threshold {
+                        info!("{:?} MySign number bit set {}, thresh {}", self.addr, utils::_count_sig(bitset.clone()), self.threshold);
+                        if utils::_count_sig(bitset.clone()) >= self.threshold {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
                                 message: ContractMessage::SubmitVote(header, U256::from(sid), U256::from(bid), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
                                 answer_channel: Some(answer_tx),
                             };
                             self.contract_handler.send(handle);
-                            info!("smart contarct update");
+                            //info!("smart contarct update");
                         }
                     }
                 },
                 Message::ScaleReqChunks(samples_idx) => {
                     let sample_len = samples_idx.len();
-                    info!("{:?} receive ScaleReqChunks of size {:?}", self.addr, sample_len);
+                    let peer = task.peer.unwrap();
+
                     // this client needs to prepare chunks in response to 
                     let mut mempool = self.mempool.lock().expect("lock mempool");
                     let (header, symbols, idx) = mempool.sample_cmt(samples_idx);
                     let header_bytes = serialize(&header);
+
+                    let hash_str = utils::hash_header_hex(&header_bytes);
+                    info!("{:?} receive {:?} ScaleReqChunks from {:?}, header hash: {:?} ", self.addr, sample_len, peer.addr, hash_str);
 
                     // this sends chunk to the scale node
                     let chunks = ChunkReply {
@@ -383,14 +407,13 @@ impl Performer {
                     // this client needs to prepare chunks in response to 
                     // scalenode
                     let response_msg = Message::ScaleReqChunksReply(chunks);
-                    task.peer.unwrap().response_sender.send(response_msg);
-                    info!("{:?} sent ScaleReqChunksReply", self.addr);
+                    peer.response_sender.send(response_msg);
                 },
                 Message::ScaleReqChunksReply(chunks) => {
                     if self.scale_id > 0 {
-                        info!("{:?} receive ScaleReqChunksReply", self.addr);
                         let proposer_socket = task.peer.unwrap().addr ;
-                                                //db.cmt_db.insert(, chunks);
+                        info!("{:?} receive ScaleReqChunksReply from {:?}", self.addr, proposer_socket);
+
 
                         match &self.proposer_by_addr.get(&proposer_socket) {
                             Some(sender) => {
