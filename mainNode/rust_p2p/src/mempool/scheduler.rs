@@ -147,35 +147,47 @@ impl Scheduler {
 
             // broadcast block to scalenode
             //let random_header = utils::_generate_random_header();
-            
+            let new_block_id =  tip_state.block_id + 1;
             let hash_str = utils::hash_header_hex(&header_message);
-            info!("propose block {} {:?}", tip_state.block_id + 1, hash_str);
+            info!("propose block {} {:?}", new_block_id, hash_str);
+            
 
-            let message =  Message::ProposeBlock((header_message, tip_state.block_id + 1)); 
+            let message =  Message::ProposeBlock((header_message, new_block_id)); 
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);
 
             // new side chain message
 
-            // Pass token
-            info!("{:?} scheduler sleep", self.socket);
-            let sleep_time = time::Duration::from_millis(10000);
-            thread::sleep(sleep_time);
-            info!("{:?} scheduler waked up", self.socket);
-            if token.ring_size >= 2 {
-                let mut index = 0;
-                for sock in &token.node_list {
-                    if *sock == self.socket {
-                        let next_index = (index + 1) % token.ring_size;
-                        //info!("next_index {}", next_index);
-                        let next_sock = token.node_list[next_index];
-                        //info!{"next sock {:?}", next_sock};
-                        let message = Message::PassToken(token.clone());
-                        let signal = ServerSignal::ServerUnicast((next_sock, message));
-                        self.server_control_sender.send(signal);
-                        break;
+            loop {
+                // Pass token
+                info!("{:?} scheduler sleep", self.socket);
+                let sleep_time = time::Duration::from_millis(1000);
+                thread::sleep(sleep_time);
+                
+                let chain = self.chain.lock().unwrap();
+                let tip_state = chain.get_latest_state().unwrap();
+                drop(chain);
+
+
+                if tip_state.block_id == new_block_id {
+                    info!("{:?} scheduler waked up", self.socket);
+                    if token.ring_size >= 2 {
+                        let mut index = 0;
+                        for sock in &token.node_list {
+                            if *sock == self.socket {
+                                let next_index = (index + 1) % token.ring_size;
+                                //info!("next_index {}", next_index);
+                                let next_sock = token.node_list[next_index];
+                                //info!{"next sock {:?}", next_sock};
+                                let message = Message::PassToken(token.clone());
+                                let signal = ServerSignal::ServerUnicast((next_sock, message));
+                                self.server_control_sender.send(signal);
+                                break;
+                            }
+                            index = (index + 1) % token.ring_size;
+                        }
                     }
-                    index = (index + 1) % token.ring_size;
+                    break;
                 }
             }
             self.token = None;

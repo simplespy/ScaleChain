@@ -32,7 +32,7 @@ pub enum Message {
     ScaleReqChunksReply(ChunkReply),
     MySign(String, usize, usize, String, String, usize),
     ScaleGetAllChunks(ContractState), // blockheader
-    ScaleGetAllChunksReply((ChunkReply, usize)),
+    ScaleGetAllChunksReply((Option<ChunkReply>, usize)),
 }
 
 

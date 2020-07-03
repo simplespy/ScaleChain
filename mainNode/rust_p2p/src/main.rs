@@ -125,6 +125,8 @@ fn main() {
     let key: BLSKey = BLSKey::new(key_str);
     let api_socket: SocketAddr = ("127.0.0.1:".to_string() + &api_port).parse().unwrap();
 
+    info!("listen port {:?} {:?}", listen_port, account );
+
     // get main data structures 
     let block_db = Arc::new(Mutex::new(BlockDb::new()));
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
@@ -173,7 +175,10 @@ fn main() {
             codes_for_decoding.clone(),
             k_set.clone()
         );
-    manager.start();
+    if scale_id == 0 {
+        manager.start();
+    }
+    
 
     let mut token: Option<Token>;
     if has_token == "0" {

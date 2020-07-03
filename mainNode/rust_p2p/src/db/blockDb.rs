@@ -10,7 +10,7 @@ use super::network::message::{ChunkReply};
 
 pub struct BlockDb {
     pub block_db: HashMap<H256, Block>, //curr_hash -> Block  not used
-    pub cmt_db: HashMap<usize, Vec<ChunkReply> >,
+    pub cmt_db: HashMap<usize, ChunkReply >,
     pub sblock_db: HashMap<usize, SBlock>,
 }
 
@@ -36,20 +36,30 @@ impl BlockDb {
         self.sblock_db.insert(block_id, sblock);
     }
 
+    pub fn get_sblock(&mut self, block_id: usize) -> Option<SBlock>{
+        match self.sblock_db.get(&block_id){
+            Some(b) => Some(b.clone()),
+            None => None,
+         }
+    }
+
     pub fn insert_cmt_sample(&mut self, block_id: usize , chunk: &ChunkReply) {
         match self.cmt_db.get_mut(&block_id) {
-            Some(chunks) => chunks.push(chunk.clone()),
+            Some(chunks) => {
+                warn!("chunk exists bid {:?} chunk {:?}", block_id, chunk);
+                self.cmt_db.insert(block_id, chunk.clone());
+            }
             None => {
-                self.cmt_db.insert(block_id, vec![chunk.clone()]);
+                self.cmt_db.insert(block_id, chunk.clone());
             }
         }
     }
 
-    pub fn get_chunk(&self, block_id: usize) -> Vec<ChunkReply> {
-         match self.cmt_db.get(&block_id) {
-            Some(chunks) => return chunks.clone(),
-            None => vec![],
-        }
+    pub fn get_chunk(&self, block_id: usize) -> Option<ChunkReply> {
+         match self.cmt_db.get(&block_id){
+            Some(chunk) => Some(chunk.clone()),
+            None => None,
+         }
     }
 
     pub fn replace(&mut self, blocks: Vec<Block>) {
@@ -65,8 +75,8 @@ impl BlockDb {
 
     pub fn get_block(&self, block_hash: H256) -> Option<Block> {
         match self.block_db.get(&block_hash) {
-            Some(block) => return Some(block.clone()),
-            None => return None,
+            Some(block) => Some(block.clone()),
+            None => None,
         }
     }
 }

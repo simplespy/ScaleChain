@@ -98,6 +98,7 @@ impl TransactionGenerator {
 
     fn send_to_mempool(&mut self, transactions: Vec<Transaction>) {
         let mut mempool = self.mempool.lock().expect("tx gen lock mempool");
+        info!("insert {}  transaction", transactions.len());
         for tx in transactions {
             mempool.insert(tx);
         }

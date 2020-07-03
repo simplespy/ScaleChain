@@ -1,0 +1,6 @@
+curl "localhost:41001/contract/reset-chain"
+curl "localhost:41001/contract/get-curr-state"
+curl "localhost:41004/transaction-generator/step?step=1000"
+curl "localhost:41005/transaction-generator/step?step=1000"
+curl "localhost:41004/blockchain/get-curr-state"
+curl "localhost:41005/blockchain/get-curr-state"

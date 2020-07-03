@@ -47,7 +47,7 @@ pub struct Performer {
     agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
     threshold: usize,
     server_control_sender: MioSender<ServerSignal>,
-    manager_source: Sender<(usize, ChunkReply)>,
+    manager_source: Sender<(usize, Option<ChunkReply>)>,
     //curr_proposer: Option<Sender<String>>,
 }
 
@@ -64,7 +64,7 @@ impl Performer {
         scale_id: usize,
         threshold: usize,
         server_control_sender: MioSender<ServerSignal>,
-        manager_source: Sender<(usize, ChunkReply)>,
+        manager_source: Sender<(usize, Option<ChunkReply>)>,
     ) -> Performer {
         Performer {
             task_source,
@@ -291,13 +291,15 @@ impl Performer {
                         let local_aggsig = self.agg_sig.clone();
                         let broadcaster = self.server_control_sender.clone();
                         let db = self.block_db.clone();
-                       
+                        let threshold = self.threshold;
+                        let contract_handler = self.contract_handler.clone();
                         
                         // timed loop
                         thread::spawn(move || {
                             let mut num_chunk = 0;
                             let chunk_thresh = 0; // number of chunk required to vote yes
                             let mut chunk_complete = false;
+                            
 
                             loop {
                                 match rx.recv() {
@@ -316,22 +318,26 @@ impl Performer {
                                     // vote
                                     let header_str: String = hex::encode(&header);
                                     //utils::_generate_random_header();
+                                    
                                     let (sigx, sigy) = utils::_sign_bls(header_str.clone(), keyfile);
-                                    let response_msg = Message::MySign(header_str.clone(), 0, block_id, sigx.clone(), sigy.clone(), scaleid);
+                                    let sid = 0;
+                                    let response_msg = Message::MySign(header_str.clone(), sid, block_id, sigx.clone(), sigy.clone(), scaleid);
+                                    info!("{:?} broadcase my sign", local_addr);
                                     let signal = ServerSignal::ServerBroadcast(response_msg);
                                     broadcaster.send(signal);
                                     
                                     let mut aggsig = local_aggsig.lock().unwrap();
                                     if aggsig.get(&header_str).is_none() {
                                         aggsig.insert(header_str.clone(),  (sigx.clone(), sigy.clone(), (1 << scaleid)));
-                                        info!("{:?} aggregate sign, bitset {}", local_addr, (1 << scaleid));
+                                        //info!("{:?} aggregate sign, bitset {}", local_addr, (1 << scaleid));
                                     }
                                     else {
                                         let ( x, y, bitset) = aggsig.get(&header_str).unwrap();
                                         let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx, sigy);
                                         let bitset = bitset + (1 << scaleid);
-                                        aggsig.insert(header_str.clone(),  (sigx, sigy, bitset.clone()));
-                                        info!("{:?} aggregate sign, bitset {}", local_addr, bitset.clone());
+                                        aggsig.insert(
+                                            header_str.clone(),  
+                                            (sigx.clone(), sigy.clone(), bitset.clone()));
                                     }
                                     break;
                                 }
@@ -360,7 +366,7 @@ impl Performer {
                     let mut aggsig = local_aggsig.lock().unwrap();
 
                     if aggsig.get(&header).is_none() {
-                        info!("{:?} Mysign first seen header", self.addr);
+                        //info!("{:?} Mysign first seen header", self.addr);
                         aggsig.insert(header.clone(),  (sigx, sigy, (1 << scale_id)));
                     }
                     else {
@@ -374,14 +380,16 @@ impl Performer {
                             bitset = bitset + (1 << scale_id);
                             aggsig.insert(header.clone(), (sigx.clone(), sigy.clone(), bitset.clone()));
                         }
-                        info!("{:?} MySign number bit set {}, thresh {}", self.addr, utils::_count_sig(bitset.clone()), self.threshold);
+                        //info!("{:?} MySign number bit set {}, thresh {}", self.addr, utils::_count_sig(bitset.clone()), self.threshold);
                         if utils::_count_sig(bitset.clone()) >= self.threshold {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
                                 message: ContractMessage::SubmitVote(header, U256::from(sid), U256::from(bid), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
                                 answer_channel: Some(answer_tx),
                             };
+                            //info!("{:?} fake submit vote", self.addr);
                             self.contract_handler.send(handle);
+
                             //info!("smart contarct update");
                         }
                     }
@@ -426,17 +434,20 @@ impl Performer {
                 },
                 Message::ScaleGetAllChunks(state) => {
                     if self.scale_id > 0 {
-                        info!("{:?} receive ScaleGetAllChunks", self.addr);
+                        info!("{:?} receive ScaleGetAllChunks {:?}", self.addr, state);
                         let local_db = self.block_db.lock().unwrap();
-                        let chunks = local_db.get_chunk(state.block_id);
+                        let chunk = local_db.get_chunk(state.block_id);
                         drop(local_db);
-                        // TODO currently a hack, assume there is only one chunk
-                        let response_msg = Message::ScaleGetAllChunksReply((chunks[0].clone(), state.block_id));
+
+                        let response_msg = match chunk {
+                            Some(chunk) => Message::ScaleGetAllChunksReply((Some(chunk), state.block_id)),
+                            None => Message::ScaleGetAllChunksReply((None, state.block_id)),
+                        };
                         task.peer.unwrap().response_sender.send(response_msg);
                     }
                 },
-                Message::ScaleGetAllChunksReply((chunks, block_id)) => {
-                    self.manager_source.send((block_id, chunks));
+                Message::ScaleGetAllChunksReply((chunk, block_id)) => {
+                    self.manager_source.send((block_id, chunk));
                 },
             }
         } 

@@ -204,13 +204,10 @@ impl Mempool {
             &self.codes_for_encoding, 
             vec![true; self.codes_for_encoding.len()]);
 
+            let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
 
 
-        //info!("codes_for_encoding.len() {}", self.codes_for_encoding.len());
-
-        //let (mut symbols, mut idx) = block.sampling_to_decode(1000 as u32); //sample_idx.len()
         let cmt_header = block.block_header.clone();
-        
         self.cmt_block = Some(block);
 
         return Some(cmt_header);
@@ -269,7 +266,7 @@ impl Mempool {
     pub fn insert(&mut self, transaction: Transaction) {
         self.transactions.push_back(transaction);
         let tx_bytes_size = self.transaction_size_in_bytes();
-        info!("insert transaction");
+        
 
         // need to truncate 
         if tx_bytes_size > self.block_size {

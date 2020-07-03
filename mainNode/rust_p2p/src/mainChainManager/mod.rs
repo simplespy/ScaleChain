@@ -6,6 +6,7 @@ use mio_extras::channel::Sender as MioSender;
 use super::network::message::{Message, ServerSignal, ChunkReply};
 use super::contract::interface::Message as ContractMessage;
 use super::contract::interface::Response as ContractResponse;
+use super::contract::utils;
 use std::sync::{Arc, Mutex};
 use std::net::SocketAddr;
 use super::blockchain::blockchain::{BlockChain};
@@ -19,6 +20,7 @@ use super::cmtda::{read_codes, BlockHeader};
 use super::cmtda::Transaction as CMTTransaction;
 use primitives::bytes::{Bytes};
 use crypto::sha3::Sha3;
+use crypto::sha2::Sha256;
 use crypto::digest::Digest;
 use super::primitive::hash::H256;
 use ser::{deserialize, serialize};
@@ -29,8 +31,8 @@ pub struct Manager {
     pub block_db: Arc<Mutex<BlockDb>>,
     pub server_control_sender: MioSender<ServerSignal>,
     pub addr: SocketAddr,
-    pub job_sink: Receiver<(usize, ChunkReply)>,
-    pub chunk_senders: HashMap<usize, Sender<ChunkReply> >,
+    pub manager_sink: Receiver<(usize, Option<ChunkReply>)>,
+    pub chunk_senders: HashMap<usize, Sender<Option<ChunkReply>> >,
     pub codes_for_encoding: Vec<Code>,
     pub codes_for_decoding: Vec<Code>,
     pub k_set: Vec<u64>,
@@ -40,7 +42,7 @@ pub struct JobManager {
     state: ContractState,
     addr: SocketAddr,
     server_control_sender: MioSender<ServerSignal>,
-    chunk_receiver: Receiver<ChunkReply>,
+    chunk_receiver: Receiver<Option<ChunkReply>>,
     block_source: Sender<Result<SBlock, CodingErr>>,
     codes_for_encoding: Vec<Code>,
     codes_for_decoding: Vec<Code>,
@@ -50,7 +52,7 @@ pub struct JobManager {
 // currently only handle one layer encoding
 fn collect_cmt_chunks(job_manager: JobManager)
 {
-    info!("{:?} managing chunks", job_manager.addr);
+    //info!("{:?} managing chunks", job_manager.addr);
     let chunk_receiver = &job_manager.chunk_receiver;
     let mut coll_symbols: Vec<Vec<Symbol>> = Vec::new();
     let mut coll_idx: Vec<Vec<u64>> = Vec::new();
@@ -60,86 +62,80 @@ fn collect_cmt_chunks(job_manager: JobManager)
         match chunk_receiver.recv() {
             // accumulate chunks 
             Ok(chunk) => {
-                info!("{:?} get cmt chunks", job_manager.addr);
-                let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();;
-                let mut hash  = [0u8; 32];
-                let header_hex: String = hex::encode(&chunk.header);
-                // get hash in the same way as bls
-                let mut hasher = Sha3::keccak256();
-                hasher.input_str(&header_hex);
-                hasher.result(&mut hash);
-                let hash: H256 = H256(hash);
-                info!("header hash {:?}", hash);
-                
-                // compare if smart contract hash equals to local
-                if hash != job_manager.state.curr_hash {
-                    info!("{:?}, inconsistent hash {:?} {:?}", 
-                          job_manager.addr,
-                          hash, 
-                          job_manager.state.curr_hash); 
-                    continue;
-                }
-                
-                let num_layer = job_manager.k_set.len();
-                if is_first_recv {
-                    is_first_recv = false;
-                    coll_symbols = chunk.symbols.clone();
-                    coll_idx = chunk.idx.clone();
-                } else {
-                    for l in 0..num_layer {
-                        let symbols = &chunk.symbols[l];
-                        let idx = &chunk.idx[l];
-                        let mut c_symbols = &mut coll_symbols[l];
-                        let mut c_idx = &mut coll_idx[l];
-                        let mut j =0;
-                        for i in idx {
-                            if c_idx.contains(i) {
-                                //
-                            } else {
-                                c_idx.push(*i);
-                                c_symbols.push(symbols[j]);
+                match chunk {
+                    None => info!("does not recv chunk"),
+                    Some(chunk) => {
+                        info!("{:?} get cmt chunks", job_manager.addr);
+
+                        let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();
+                                                
+                        let num_layer = job_manager.k_set.len();
+                        if is_first_recv {
+                            is_first_recv = false;
+                            coll_symbols = chunk.symbols.clone();
+                            coll_idx = chunk.idx.clone();
+                        } else {
+                            for l in 0..num_layer {
+                                let symbols = &chunk.symbols[l];
+                                let idx = &chunk.idx[l];
+                                let mut c_symbols = &mut coll_symbols[l];
+                                let mut c_idx = &mut coll_idx[l];
+                                let mut j =0;
+                                for i in idx {
+                                    if c_idx.contains(i) {
+                                        //
+                                    } else {
+                                        c_idx.push(*i);
+                                        c_symbols.push(symbols[j]);
+                                    }
+                                    j += 1;
+                                }
                             }
-                            j += 1;
+                        }
+
+                        
+                        //info!("recon len {}", recon.len());
+                        //info!("{:?}", hex::encode(recon));
+                        
+                        // accumulate chunks + currently only handle single layer
+                        let mut decoder: TreeDecoder = TreeDecoder::new(
+                            job_manager.codes_for_decoding.to_vec(), 
+                            &header.coded_merkle_roots_hashes);
+                        let mut cmt_pass = match decoder.run_tree_decoder(coll_symbols.clone(), coll_idx.clone()) {
+                            Ok(()) => true,
+                            _ => false,
+                        };
+                        if cmt_pass {
+                            info!("{:?} cmt pass", job_manager.addr);
+                            // collect all base + reconstruct block
+                            let mut recon:Vec<u8> = vec![];
+                            let systematic_symbol_len = job_manager.k_set[0];
+                            for i in 0..systematic_symbol_len {
+                                for j in 0..(coll_symbols[0].len()) {
+                                    if coll_idx[0][j] == i as u64 {
+                                        match coll_symbols[0][j] {
+                                            Symbol::Base(s) => recon.extend_from_slice(&s),
+                                            _ => unreachable!(),
+                                        }
+                                    }
+                                }
+                            }
+                            // convert bytes into vec<transaction>
+                            //info!("{:?} vec<tx> {:?}", self.addr, recon);
+                            // TODO
+                            let mut r = SBlock {
+                                block_header: header.clone(),
+                                transactions: vec![],
+                                coded_tree: vec![],
+                                block_size_in_bytes:0 
+                            };
+
+                            job_manager.block_source.send(Ok(r));
+                        } else {
+                            info!("{:?} cmt invalid", job_manager.addr);
+                            // error handle
                         }
                     }
-                }
-
-                //let mut recon:Vec<u8> = vec![];
-                //let systematic_symbol_len = k_set[0];
-                //for i in 0..systematic_symbol_len {
-                    //for j in 0..(coll_symbols[0].len()) {
-                        //if idx[0][j] == i as u64 {
-                            //match symbols[0][j] {
-                                //Symbol::Base(s) => recon.extend_from_slice(&s),
-                                //_ => unreachable!(),
-                            //}
-                        //}
-                    //}
-                //}
-
-                //let mut trans_byte = cmt_block.transactions.iter().map(CMTTransaction::bytes).collect::<Vec<Bytes>>();
-                //info!("trans_byte {:?}", trans_byte);
-
-                //info!("recon len {}", recon.len());
-                //info!("{:?}", hex::encode(recon));
-                
-                // accumulate chunks + currently only handle single layer
-                let mut decoder: TreeDecoder = TreeDecoder::new(
-                    job_manager.codes_for_decoding.to_vec(), 
-                    &header.coded_merkle_roots_hashes);
-                let mut cmt_pass = match decoder.run_tree_decoder(coll_symbols.clone(), coll_idx.clone()) {
-                    Ok(()) => true,
-                    _ => false,
-                };
-                let cmt_pass = true;
-                if cmt_pass {
-                    info!("{:?} cmt pass", job_manager.addr);
-                    // collect all base + reconstruct block
-
-
-                } else {
-                    info!("{:?} cmt invalid", job_manager.addr);
-                    // error handle
                 }
             }
            _ => panic!("{:?} job manager error", job_manager.addr),
@@ -153,7 +149,7 @@ impl Manager {
         chain: Arc<Mutex<BlockChain>>,
         server_control_sender: MioSender<ServerSignal>,
         addr: SocketAddr,     
-        job_sink: Receiver<(usize, ChunkReply)>,
+        manager_sink: Receiver<(usize, Option<ChunkReply>)>,
         block_db: Arc<Mutex<BlockDb>>,
         codes_for_encoding: Vec<Code>,
         codes_for_decoding: Vec<Code>,
@@ -165,7 +161,7 @@ impl Manager {
             server_control_sender: server_control_sender,
             addr: addr,
             chunk_senders: HashMap::new(),
-            job_sink: job_sink,
+            manager_sink: manager_sink,
             block_db: block_db,
             codes_for_encoding: codes_for_encoding,
             codes_for_decoding: codes_for_decoding,
@@ -179,10 +175,10 @@ impl Manager {
             let mut blocks_sink: HashMap<usize, Receiver<Result<SBlock, CodingErr>>> = HashMap::new();
             let mut register_blocks: HashMap<usize, ContractState> = HashMap::new();
             let mut ready_blocks: HashMap<usize, ContractState> = HashMap::new();
+            let mut longest_id = 0;
             loop {
                 let mut rm: Vec<usize> = vec![];
                 // check if any threads finish
-                info!("{:?} hello1", self.addr);
                 for (block_id, block_sink) in &blocks_sink {
                     match block_sink.try_recv() {
                         Err(TryRecvError::Empty) => (),
@@ -191,7 +187,6 @@ impl Manager {
                             // a thread has finished processing cmt
                             match result {
                                 Ok(sblock) => {
-
                                     info!("{:?} cmt finishes", self.addr);
                                     rm.push(*block_id);
                                     let mut sblock_db = self.block_db.lock().unwrap();
@@ -205,13 +200,54 @@ impl Manager {
                                     // update blockchain
                                     let mut local_chain = self.chain.lock().unwrap();
                                     let tip_state = local_chain.get_latest_state().unwrap();
+                                    info!("{:?} tip_state {:?} longest_id {}", self.addr, tip_state, longest_id);
 
+                                    let mut curr_hash = tip_state.curr_hash.clone();
                                     // test if update block chain
-                                    for i in (tip_state.block_id+1) .. (*block_id+1) {
+                                    for i in (tip_state.block_id+1) .. (longest_id+1) {
                                         match ready_blocks.get(&i) {
                                             None => info!("{:?} block {} is missing", self.addr, i),
                                             Some(s) => {
+                                                info!("{:?} db get block {:?}", self.addr, i);
+                                                let mut sblock_db = self.block_db.lock().unwrap();
+                                                let header = match sblock_db.get_sblock(*block_id) {
+                                                    Some(b) => b.block_header.clone(),
+                                                    None => unreachable!(),
+                                                };
+                                                drop(sblock_db);
+
+                                                let mut hash  = [0u8; 32];
+                                                let header_bytes = serialize(&header);
+                                                // get hash in the same way as bls
+                                                let mut hasher = Sha256::new();;
+                                                hasher.input(&header_bytes);
+                                                hasher.result(&mut hash);
+                                                let hash_str = hex::encode(&hash);
+                                                info!("header hash {:?}", hash_str);
+
+                                                //let mut curr_hash_str: String = hex::encode(&curr_hash.0);
+                                                let v = [ curr_hash.0, hash].concat();
+                                                let mut sec_hasher = Sha256::new();
+                                                let mut hash  = [0u8; 32];
+                                                sec_hasher.input(&v);
+                                                sec_hasher.result(&mut hash);
+
+                                                // compare if smart contract hash equals to local
+                                                let new_hash = H256(hash);
+                                                info!("new hash {:?}", new_hash);
+                                                if  new_hash != s.curr_hash {
+                                                    info!("{:?}, inconsistent hash {:?} smart contract {} hash {:?}", 
+                                                          self.addr,
+                                                          new_hash, 
+                                                          i,
+                                                          s.curr_hash); 
+                                                    break; 
+                                                }
+
+                                                info!("{:?} local chain update to {:?}", self.addr, s);
+
                                                 local_chain.append(s);
+                                                curr_hash = s.curr_hash;
                                             },
                                         }
                                     }
@@ -226,21 +262,23 @@ impl Manager {
                 for block_id in &rm {
                     blocks_sink.remove(block_id);
                 }
-                info!("{:?} hello2", self.addr);
-                match self.job_sink.try_recv() {
+
+                // job distributor to threads sender receiver
+                match self.manager_sink.try_recv() {
                     Err(TryRecvError::Empty) => (),
                     Err(TryRecvError::Disconnected) => panic!("manager sink broken"),
-                    Ok((block_id, chunks)) => {
+                    Ok((block_id, chunk)) => {
                         match self.chunk_senders.get(&block_id) {
                             None => info!("{:?} Error  no cmt get all request", self.addr),
-                            Some(chunk_sender) => chunk_sender.send(chunks).unwrap(),
+                            Some(chunk_sender) => chunk_sender.send(chunk).unwrap(),
                         }
                     }
                 }
 
-                info!("{:?} hello3 sleep", self.addr);// every 1 sec pull mainchain state
-                let sleep_time = time::Duration::from_millis(1000000000);
+                let sleep_time = time::Duration::from_millis(10000);
                 thread::sleep(sleep_time);
+
+                //check current state
                 let (answer_tx, answer_rx) = channel::bounded(1);
                 let handle = Handle {
                     message: ContractMessage::GetCurrState(0),
@@ -257,7 +295,6 @@ impl Manager {
                                         let mut local_chain = self.chain.lock().unwrap();
                                         let tip_state = local_chain.get_latest_state().expect("blockchain does not have state");
                                         drop(local_chain);
-
                                         // Ask performer to do the task
                                         if tip_state != state {
                                             if (false) {
@@ -267,7 +304,10 @@ impl Manager {
                                                 if self.chunk_senders.contains_key(&state.block_id) {
                                                     continue;
                                                 } 
-                                                info!("mainchain new state {:?} tip_state {:?}", state, tip_state);
+                                                info!("{:?}, update start: mainchain new state {:?} tip_state {:?}", self.addr, state, tip_state);
+                                                if longest_id < state.block_id {
+                                                    longest_id = state.block_id;
+                                                }
 
                                                 // get block from scale node network
                                                 let (chunk_sender, chunk_receiver) = crossbeam::channel::unbounded();
@@ -290,6 +330,13 @@ impl Manager {
                                                 thread::spawn(move || {
                                                     collect_cmt_chunks(job_manager);
                                                });
+
+                                                // broadcast get all chunks
+                                                let response_msg = Message::ScaleGetAllChunks(state.clone());
+                                                info!("{:?} broadcase ScaleGetAllChunks {:?}", self.addr, state);
+                                                let signal = ServerSignal::ServerBroadcast(response_msg);
+                                                self.server_control_sender.send(signal);
+
                                             }
                                         }
                                     },

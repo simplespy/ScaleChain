@@ -57,7 +57,7 @@ pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U25
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
-    println!("{:?}", output);
+    //println!("{:?}", output);
 
     let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
     return function_abi;
@@ -66,7 +66,7 @@ pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U25
 
 pub fn _encode_submitVote(block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
     let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {} -p {} -p {}", block, sid, bid, sigx, sigy, bitset);
-    println!("command {}", command.clone());
+    //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -80,7 +80,7 @@ pub fn _encode_resetSideChain(sid: U256) -> Vec<u8> {
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
-    println!("{:?}", output);
+    //println!("{:?}", output);
 
     let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
     return function_abi;
@@ -101,8 +101,8 @@ pub fn _decode_sendBlock(input: &str) -> (String, usize) {
 }
 
 pub fn _sign_bls(msg: String, key_file: String) -> (String, String) {
-    let command = format!("./sign -msg={} -key=keyfile/{}", msg, key_file);
-    //println!("command {}", command.clone());
+    let command = format!("./sign -msg={} -key={}", msg, key_file);
+    //info!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -114,10 +114,22 @@ pub fn _sign_bls(msg: String, key_file: String) -> (String, String) {
 
 }
 
+//pub fn _aggregate_sig(x1: String, y1: String, x2: String, y2: String)-> (String, String) {
+    //let command = format!("./aggregate -x1={} -y1={} -x2={} -y2={}", x1, y1, x2, y2);
+    //println!("command {}", command.clone());
+    //let output = Command::new("sh").arg("-c")
+        //.arg(command)
+        //.output().unwrap();
+
+    ////let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    //let sig = std::str::from_utf8(&output.stdout).unwrap().split("\n");
+    //let sig: Vec<&str> = sig.collect();
+    //return (sig[0].to_string(), sig[1].to_string());
+//}
 
 pub fn _aggregate_sig(x1: String, y1: String, x2: String, y2: String)-> (String, String) {
     let command = format!("./aggregate -x1={} -y1={} -x2={} -y2={}", x1, y1, x2, y2);
-    //println!("command {}", command.clone());
+    //info!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
