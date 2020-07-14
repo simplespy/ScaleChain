@@ -16,4 +16,4 @@ use super::cmtda;
 
 
 // should be greater than coded_merkle_tree/chain constants.rs BLOCK_SIZE
-pub const MSG_BUF_SIZE: usize = 65535;
+pub const MSG_BUF_SIZE: usize = 1000_000;//65535;

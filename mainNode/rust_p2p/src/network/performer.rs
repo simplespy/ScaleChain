@@ -31,7 +31,7 @@ use ser::{deserialize, serialize};
 use mio_extras::channel::Sender as MioSender;
 use super::cmtda::{BlockHeader};
 use hex;
-
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct Performer {
     task_source: Receiver<TaskRequest>,
@@ -240,11 +240,12 @@ impl Performer {
     fn perform(&mut self) {
         loop {
             let task = self.task_source.recv().unwrap();
+            let peer_handle = task.peer.unwrap();
             match task.msg {
                 Message::Ping(info_msg) => {
                     info!("receive Ping {}", info_msg);
                     let response_msg = Message::Pong("pong".to_string());
-                    task.peer.unwrap().response_sender.send(response_msg);
+                    peer_handle.write(response_msg);
                 }, 
                 Message::Pong(info_msg) => {
                     info!("receive Pong {}", info_msg);                  
@@ -260,31 +261,24 @@ impl Performer {
                     drop(mempool);
                 },
                 Message::PassToken(token) => {
-                    // call scheduler
                     info!("{:?} receive token", self.addr);
                     self.scheduler_handler.send(Some(token));
                 },
-
-                // temporary heck, need to move to scale-network
-                // CMT worker thread
                 Message::ProposeBlock((header, block_id)) => {
                     if self.scale_id > 0 {
                         let hash_str = utils::hash_header_hex(&header);
                         info!("{:?} receive ProposeBlock: header hash: {:?}", self.addr, hash_str);
                         let local_addr = self.addr.clone();
-                        let peer_handle = task.peer.unwrap();
+                        
                         let proposer_addr = peer_handle.addr;
 
                         let (tx, rx) = channel::unbounded();
                         self.proposer_by_addr.insert(proposer_addr, tx);
                         // this scalenode receive propose block
-                        // ask the node to send chunks
-                        //let start_time = time::
-                        // send neighbor to send chunks
                         let response_msg = Message::ScaleReqChunks;
-                        let samples_idx: Vec<u32> = vec![0; 1000];
+                        let samples_idx: Vec<u32> = vec![0; 35];
                         let response_msg = Message::ScaleReqChunks(samples_idx);
-                        peer_handle.response_sender.send(response_msg);
+                        peer_handle.write(response_msg);
 
                         let keyfile = self.key_file.clone();
                         let scaleid = self.scale_id.clone();
@@ -355,8 +349,7 @@ impl Performer {
                     // new
                     let decode_header = hex::decode(&header).unwrap();
                     let header_hash_str = utils::hash_header_hex(&decode_header);
-                    let peer = task.peer.unwrap();
-                    info!("{:?} receive Mysign from {:?}: header hash: {:?}", self.addr, peer.addr,header_hash_str);
+                    info!("{:?} receive Mysign header hash: {:?}", self.addr, header_hash_str);
                     let mut sigx = sigx;
                     let mut sigy = sigy;
                     //info!("{:?} receive MySign message from node {:?}.", self.addr, scale_id);
@@ -396,7 +389,6 @@ impl Performer {
                 },
                 Message::ScaleReqChunks(samples_idx) => {
                     let sample_len = samples_idx.len();
-                    let peer = task.peer.unwrap();
 
                     // this client needs to prepare chunks in response to 
                     let mut mempool = self.mempool.lock().expect("lock mempool");
@@ -404,25 +396,22 @@ impl Performer {
                     let header_bytes = serialize(&header);
 
                     let hash_str = utils::hash_header_hex(&header_bytes);
-                    info!("{:?} receive {:?} ScaleReqChunks from {:?}, header hash: {:?} ", self.addr, sample_len, peer.addr, hash_str);
-
+                    info!("{:?} recv {:?} ScaleReqChunks, header hash: {:?} ", self.addr, sample_len, hash_str);
                     // this sends chunk to the scale node
                     let chunks = ChunkReply {
                         header: header_bytes.into(),
                         symbols: symbols,
                         idx: idx,
                     };
-                    // this client needs to prepare chunks in response to 
-                    // scalenode
+                    // this client needs to prepare chunks in response to scalenode
+
                     let response_msg = Message::ScaleReqChunksReply(chunks);
-                    peer.response_sender.send(response_msg);
+                    peer_handle.write(response_msg);
                 },
                 Message::ScaleReqChunksReply(chunks) => {
                     if self.scale_id > 0 {
-                        let proposer_socket = task.peer.unwrap().addr ;
+                        let proposer_socket = peer_handle.addr ;
                         info!("{:?} receive ScaleReqChunksReply from {:?}", self.addr, proposer_socket);
-
-
                         match &self.proposer_by_addr.get(&proposer_socket) {
                             Some(sender) => {
                                 sender.send(chunks);
@@ -438,15 +427,15 @@ impl Performer {
                         let local_db = self.block_db.lock().unwrap();
                         let chunk = local_db.get_chunk(state.block_id);
                         drop(local_db);
-
                         let response_msg = match chunk {
                             Some(chunk) => Message::ScaleGetAllChunksReply((Some(chunk), state.block_id)),
                             None => Message::ScaleGetAllChunksReply((None, state.block_id)),
                         };
-                        task.peer.unwrap().response_sender.send(response_msg);
+                        peer_handle.write(response_msg);
                     }
                 },
                 Message::ScaleGetAllChunksReply((chunk, block_id)) => {
+                    info!("{:?} recv ScaleGetAllChunksReply", self.addr);
                     self.manager_source.send((block_id, chunk));
                 },
             }

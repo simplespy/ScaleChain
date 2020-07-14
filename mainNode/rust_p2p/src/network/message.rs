@@ -39,7 +39,7 @@ pub enum Message {
 #[derive(Debug, Clone)]
 pub struct ConnectHandle {
     pub result_sender: mpsc::Sender<ConnectResult>,
-    pub dest_addr: String,
+    pub dest_addr: SocketAddr,
 }
 
 #[derive(Debug, Clone)]
@@ -54,8 +54,17 @@ pub enum ServerSignal {
 
 #[derive(Clone)]
 pub struct PeerHandle {
-    pub response_sender: channel::Sender<Message>,   
+    pub write_queue: channel::Sender<Vec<u8>>,   
     pub addr: SocketAddr,
+}
+
+impl PeerHandle {
+    pub fn write(&self, msg: Message) {
+        let buffer = bincode::serialize(&msg).unwrap();
+        if self.write_queue.send(buffer).is_err() {
+            warn!("Failed to send write request for peer {}, channel detached", self.addr);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

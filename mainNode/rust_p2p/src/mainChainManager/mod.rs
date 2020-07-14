@@ -24,6 +24,8 @@ use crypto::sha2::Sha256;
 use crypto::digest::Digest;
 use super::primitive::hash::H256;
 use ser::{deserialize, serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
+use super::experiment::snapshot::PERFORMANCE_COUNTER;
 
 pub struct Manager {
     pub contract_handler: Sender<Handle>,
@@ -50,13 +52,14 @@ pub struct JobManager {
 }
 
 // currently only handle one layer encoding
-fn collect_cmt_chunks(job_manager: JobManager)
-{
+fn collect_cmt_chunks(job_manager: JobManager) {
     //info!("{:?} managing chunks", job_manager.addr);
     let chunk_receiver = &job_manager.chunk_receiver;
     let mut coll_symbols: Vec<Vec<Symbol>> = Vec::new();
     let mut coll_idx: Vec<Vec<u64>> = Vec::new();
     let mut is_first_recv = true;
+    let start = SystemTime::now();
+    info!("{:?} start collect cmt for {:?}", job_manager.addr, job_manager.state);
     loop {
         // accumulate chunks
         match chunk_receiver.recv() {
@@ -65,15 +68,20 @@ fn collect_cmt_chunks(job_manager: JobManager)
                 match chunk {
                     None => info!("does not recv chunk"),
                     Some(chunk) => {
-                        info!("{:?} get cmt chunks", job_manager.addr);
-
+                        let elapsed = start.elapsed();
+                        let hash_str = utils::hash_header_hex(&chunk.header as &[u8]);
+                        info!("{:?} get hash_str  {:?} {:?}", job_manager.addr, hash_str, elapsed);
                         let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();
+
+                        
                                                 
                         let num_layer = job_manager.k_set.len();
                         if is_first_recv {
                             is_first_recv = false;
                             coll_symbols = chunk.symbols.clone();
                             coll_idx = chunk.idx.clone();
+                            info!("coll_symbols {:?}", coll_symbols.len());
+                            info!("coll_idx {:?}", coll_idx.len());
                         } else {
                             for l in 0..num_layer {
                                 let symbols = &chunk.symbols[l];
@@ -176,6 +184,10 @@ impl Manager {
             let mut register_blocks: HashMap<usize, ContractState> = HashMap::new();
             let mut ready_blocks: HashMap<usize, ContractState> = HashMap::new();
             let mut longest_id = 0;
+            let mut start = SystemTime::now();
+
+            let check_hash = false;
+
             loop {
                 let mut rm: Vec<usize> = vec![];
                 // check if any threads finish
@@ -241,13 +253,16 @@ impl Manager {
                                                           new_hash, 
                                                           i,
                                                           s.curr_hash); 
-                                                    break; 
+                                                    if check_hash{
+                                                        break; 
+                                                    }
                                                 }
 
                                                 info!("{:?} local chain update to {:?}", self.addr, s);
 
                                                 local_chain.append(s);
                                                 curr_hash = s.curr_hash;
+                                                PERFORMANCE_COUNTER.record_chain_update();
                                             },
                                         }
                                     }
@@ -275,80 +290,84 @@ impl Manager {
                     }
                 }
 
-                let sleep_time = time::Duration::from_millis(10000);
-                thread::sleep(sleep_time);
+                let interval = time::Duration::from_millis(100);
+                thread::sleep(interval);
 
-                //check current state
-                let (answer_tx, answer_rx) = channel::bounded(1);
-                let handle = Handle {
-                    message: ContractMessage::GetCurrState(0),
-                    answer_channel: Some(answer_tx),
-                };
-                self.contract_handler.send(handle);
-                let mut curr_state: Option<ContractState> = None;
-                match answer_rx.recv() {
-                    Ok(answer) => {
-                        match answer {
-                            Answer::Success(resp) => {
-                                match resp {
-                                    ContractResponse::GetCurrState(state) => {
-                                        let mut local_chain = self.chain.lock().unwrap();
-                                        let tip_state = local_chain.get_latest_state().expect("blockchain does not have state");
-                                        drop(local_chain);
-                                        // Ask performer to do the task
-                                        if tip_state != state {
-                                            if (false) {
-                                                // if get correct block from side chain network
-                                            } else {
-                                                // if task is already handled
-                                                if self.chunk_senders.contains_key(&state.block_id) {
-                                                    continue;
-                                                } 
-                                                info!("{:?}, update start: mainchain new state {:?} tip_state {:?}", self.addr, state, tip_state);
-                                                if longest_id < state.block_id {
-                                                    longest_id = state.block_id;
+                // check state every  sec
+                if start.elapsed().unwrap() > time::Duration::from_millis(2000) {
+                    //check current state
+                    info!("{:?} check smart contract", self.addr);
+                    start = SystemTime::now();
+                    let (answer_tx, answer_rx) = channel::bounded(1);
+                    let handle = Handle {
+                        message: ContractMessage::GetCurrState(0),
+                        answer_channel: Some(answer_tx),
+                    };
+                    self.contract_handler.send(handle);
+                    let mut curr_state: Option<ContractState> = None;
+                    match answer_rx.recv() {
+                        Ok(answer) => {
+                            match answer {
+                                Answer::Success(resp) => {
+                                    match resp {
+                                        ContractResponse::GetCurrState(state) => {
+                                            let mut local_chain = self.chain.lock().unwrap();
+                                            let tip_state = local_chain.get_latest_state().expect("blockchain does not have state");
+                                            drop(local_chain);
+                                            // Ask performer to do the task
+                                            if tip_state != state {
+                                                if (false) {
+                                                    // if get correct block from side chain network
+                                                } else {
+                                                    // if task is already handled
+                                                    if self.chunk_senders.contains_key(&state.block_id) {
+                                                        continue;
+                                                    } 
+                                                    info!("{:?}, update start: mainchain new state {:?} tip_state {:?}", self.addr, state, tip_state);
+                                                    if longest_id < state.block_id {
+                                                        longest_id = state.block_id;
+                                                    }
+
+                                                    // get block from scale node network
+                                                    let (chunk_sender, chunk_receiver) = crossbeam::channel::unbounded();
+                                                    let (block_sender, block_receiver) = crossbeam::channel::unbounded();
+                                                    register_blocks.insert(state.block_id, state.clone());
+                                                    blocks_sink.insert(state.block_id, block_receiver);
+                                                    self.chunk_senders.insert(state.block_id, chunk_sender);
+                                                    let mut job_manager = JobManager {
+                                                        state: state.clone(), 
+                                                        addr: self.addr.clone(),
+                                                        server_control_sender: self.server_control_sender.clone(),
+                                                        chunk_receiver: chunk_receiver,
+                                                        block_source: block_sender,
+                                                        k_set: self.k_set.clone(),
+                                                        codes_for_encoding: self.codes_for_encoding.clone(),
+                                                        codes_for_decoding: self.codes_for_decoding.clone(),
+                                                    };
+
+                                                    // create a new handler for each block
+                                                    thread::spawn(move || {
+                                                        collect_cmt_chunks(job_manager);
+                                                   });
+
+                                                    // broadcast get all chunks
+                                                    let response_msg = Message::ScaleGetAllChunks(state.clone());
+                                                    info!("{:?} broadcase ScaleGetAllChunks {:?}", self.addr, state);
+                                                    let signal = ServerSignal::ServerBroadcast(response_msg);
+                                                    self.server_control_sender.send(signal);
+
                                                 }
-
-                                                // get block from scale node network
-                                                let (chunk_sender, chunk_receiver) = crossbeam::channel::unbounded();
-                                                let (block_sender, block_receiver) = crossbeam::channel::unbounded();
-                                                register_blocks.insert(state.block_id, state.clone());
-                                                blocks_sink.insert(state.block_id, block_receiver);
-                                                self.chunk_senders.insert(state.block_id, chunk_sender);
-                                                let mut job_manager = JobManager {
-                                                    state: state.clone(), 
-                                                    addr: self.addr.clone(),
-                                                    server_control_sender: self.server_control_sender.clone(),
-                                                    chunk_receiver: chunk_receiver,
-                                                    block_source: block_sender,
-                                                    k_set: self.k_set.clone(),
-                                                    codes_for_encoding: self.codes_for_encoding.clone(),
-                                                    codes_for_decoding: self.codes_for_decoding.clone(),
-                                                };
-
-                                                // create a new handler for each block
-                                                thread::spawn(move || {
-                                                    collect_cmt_chunks(job_manager);
-                                               });
-
-                                                // broadcast get all chunks
-                                                let response_msg = Message::ScaleGetAllChunks(state.clone());
-                                                info!("{:?} broadcase ScaleGetAllChunks {:?}", self.addr, state);
-                                                let signal = ServerSignal::ServerBroadcast(response_msg);
-                                                self.server_control_sender.send(signal);
-
                                             }
-                                        }
-                                    },
-                                    _ => panic!("performer contract get wrong answer"), 
-                                }
-                            },
-                            _ => panic!("fail"),
-                        }
-                    },
-                    Err(e) => panic!("performer contract channel broke"), 
+                                        },
+                                        _ => panic!("performer contract get wrong answer"), 
+                                    }
+                                },
+                                _ => panic!("fail"),
+                            }
+                        },
+                        Err(e) => panic!("performer contract channel broke"), 
+                    }
                 }
-                
             }
         });
     }

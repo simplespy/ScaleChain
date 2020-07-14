@@ -22,6 +22,8 @@ use primitives::bytes::{Bytes};
 use ser::{deserialize, serialize};
 use std::net::{SocketAddr};
 use rand::Rng;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 
 pub struct Mempool {
     transactions: VecDeque<Transaction>,
@@ -95,8 +97,8 @@ impl Mempool {
                 //info!("{:?} transactions {:?}", self.addr, cmt_block.transactions);
 
                 let (mut symbols, mut idx) = cmt_block.sampling_to_decode(1000 as u32); //sample_idx.len()
-                //info!("idx {:?}", idx);
-                //info!("symbols {:?}", symbols);
+                info!("{:?} idx len {:?}", self.addr, idx.len());
+                info!("{:?} symbols len {:?}", self.addr, symbols.len());
                 // tests 
                 //info!("{:?} after reading code, len {} {}", self.addr, self.codes_for_encoding.len(), self.codes_for_decoding.len());
                 //info!("{:?} before constructing tree decoder", self.addr);
@@ -122,9 +124,11 @@ impl Mempool {
 
     pub fn prepare_cmt_block(&mut self) -> Option<BlockHeader> {
         if self.transactions.len() == 0 {
+            info!("{:?} no transaction", self.addr); 
             return None;
         }
 
+        info!("{:?} prepare header", self.addr); 
         // get CMT
         let mut rng = rand::thread_rng();
         let header = BlockHeader {
@@ -137,15 +141,13 @@ impl Mempool {
             coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
         };
         // CMT - propose block
-        //let transaction_size = String::from(t).len();
-        //info!("{:?} transaction_size {:?}", self.addr, transaction_size);
+        let transaction_size = Transaction::bytes(&self.transactions[0]).len();
+        info!("{:?} transaction_size {:?}", self.addr, transaction_size);
 
         let mut transactions: Vec<Transaction> = Vec::new();
         let tx_bytes_size = self.transaction_size_in_bytes();
 
         // need to truncate 
-        //info!("num transaction {}", self.transactions.len());
-        //info!("tx_bytes_size {} self.block_size {}", tx_bytes_size , self.block_size);
         if tx_bytes_size > self.block_size {
             let mut s = 0;
             for i in 0..self.transactions.len() {
@@ -176,26 +178,9 @@ impl Mempool {
         for tx in &trans_byte {
             total_size +=  tx.len();
         }
-        info!("{:?} total_size {}  hello {:?}", self.addr, transactions.len(), total_size); 
+        info!("{:?} total_size {}  hello {:?}, codes_for_encoding len {}", self.addr, transactions.len(), total_size, self.codes_for_encoding.len()); 
 
-        //let num_transactions = BLOCK_SIZE / (transaction_size as u64);
-        //info!("{:?} num_transactions {:?}", self.addr, num_transactions);
-
-        //let transactions: Vec<Transaction> = vec![t.into();num_transactions as usize];
-        
-        // number of systematic symbols for the codes on the four layers of CMT
-        // info!("num code {:?} Code len {}", self.codes_for_encoding.len(), self.codes_for_encoding[0].symbols.len()); 
-        //for i in 0..(codes_for_encoding.len()-1) {
-            //info!("codes level {} parity len {} inner len {} {}", 
-                  //i, codes_for_encoding[i].parities.len(), 
-                  //codes_for_encoding[i].parities[0].len(),
-                  //codes_for_encoding[i].parities[100].len());
-            //info!("codes level {} symbol len {} inner len {} {}", 
-                  //i, codes_for_encoding[i].symbols.len(),
-                  //codes_for_encoding[i].symbols[0].len(),
-                  //codes_for_encoding[i].symbols[100].len());
-        //}
-
+        let start = SystemTime::now();
         let block: CMTBlock = CMTBlock::new(
             header.clone(), 
             &transactions, 
@@ -204,13 +189,21 @@ impl Mempool {
             &self.codes_for_encoding, 
             vec![true; self.codes_for_encoding.len()]);
 
-            let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
-
+        info!("codes_for_encoding len {}", self.codes_for_encoding.len());
+        info!("{:?} cmt block construction time {:?}", self.addr, start.elapsed()); 
+        info!("{:?} self.codes_for_encoding len {}", self.addr, self.codes_for_encoding.len()); 
+        //let (mut symbols, mut idx) = block.sampling_to_decode(100 as u32); //sample_idx.len()
+        //info!("{:?} symbols {} {:?}", self.addr, symbols.len(), symbols); 
+        //info!("{:?} idx {} {:?}", self.addr, idx.len(),  idx); 
 
         let cmt_header = block.block_header.clone();
         self.cmt_block = Some(block);
 
         return Some(cmt_header);
+    }
+
+    pub fn len(&self) -> usize {
+        self.transactions.len()
     }
 
     pub fn prepare_block(&mut self) -> Option<Block> {
@@ -269,7 +262,7 @@ impl Mempool {
         
 
         // need to truncate 
-        if tx_bytes_size > self.block_size {
+        if tx_bytes_size > 0 {//self.block_size {
             self.schedule_handler.send(None);
         }
     }

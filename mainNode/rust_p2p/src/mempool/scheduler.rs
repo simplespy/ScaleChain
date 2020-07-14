@@ -16,7 +16,7 @@ use super::contract::interface::Message as ContractMessage;
 use super::contract::interface::Response as ContractResponse;
 use crypto::sha3::Sha3;
 use crypto::digest::Digest;
-
+use std::time::{SystemTime, UNIX_EPOCH};
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -109,6 +109,7 @@ impl Scheduler {
                 Some(h) => h,
                 None => return false,
             };
+            info!("{:?} mempool create block finish", self.socket);
             drop(mempool);
             let header_bytes = serialize(&header);
 
@@ -155,12 +156,13 @@ impl Scheduler {
             let message =  Message::ProposeBlock((header_message, new_block_id)); 
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);
+            let start = SystemTime::now();
+
 
             // new side chain message
 
             loop {
                 // Pass token
-                info!("{:?} scheduler sleep", self.socket);
                 let sleep_time = time::Duration::from_millis(1000);
                 thread::sleep(sleep_time);
                 
@@ -170,7 +172,8 @@ impl Scheduler {
 
 
                 if tip_state.block_id == new_block_id {
-                    info!("{:?} scheduler waked up", self.socket);
+                    let elapsed = start.elapsed();
+                    info!("{:?} passing token. time taken {:?}", self.socket, elapsed);
                     if token.ring_size >= 2 {
                         let mut index = 0;
                         for sock in &token.node_list {

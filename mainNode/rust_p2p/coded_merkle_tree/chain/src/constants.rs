@@ -28,7 +28,7 @@ pub const SATOSHIS_IN_COIN: u64 = 100_000_000;
 //Configuration file for construction of coded Merkle tree
 
 //size of transactions in a block in bytes
-pub const BLOCK_SIZE: u64 = 11000;//131072;
+pub const BLOCK_SIZE: u64 = 4800;//10000;//131072; 40000 65535 4800
 
 //size of a symbol on the base layer in bytes
 pub const BASE_SYMBOL_SIZE: usize = 256;
@@ -40,7 +40,7 @@ pub const AGGREGATE: usize = 8;
 pub const RATE: f32 = 0.25;
 
 //number of hashes of coded symbols stored in the block header 
-pub const HEADER_SIZE: u32 = 256;
+pub const HEADER_SIZE: u32 = 32; //256
 
 //number of times to sample the base symbols of the CMT
 pub const NUMBER_ITERATION: u32 = 10;

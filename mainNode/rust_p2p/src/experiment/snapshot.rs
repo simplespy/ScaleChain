@@ -27,6 +27,8 @@ impl Counter {
         self.chain_depth.store(chain_len, Ordering::Relaxed);
     }
 
+
+
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             generated_transactions: self.generated_transactions.load(Ordering::Relaxed),

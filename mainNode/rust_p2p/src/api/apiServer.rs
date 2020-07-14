@@ -87,7 +87,23 @@ impl ApiServer {
         
                         },
                         "/transaction-generator/start" => {
-                            rc.tx_control.send(TxGenSignal::Start);
+                            let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                            let interval = match pairs.get("interval") {
+                                Some(s) => s,
+                                None => {
+                                    respond_result!(request, false, "missing step");
+                                    return;
+                                },
+                            };
+                            let s = match interval.parse::<usize>() {
+                                Ok(s) => s,
+                                Err(_) => {
+                                    respond_result!(request, false, "step needs to be numeric");
+                                    return;
+                                },
+                            };
+                            rc.tx_control.send(TxGenSignal::Start(s as u64));
+                            respond_result!(request, true, "ok");
                         },
                         "/transaction-generator/stop" => {
                             rc.tx_control.send(TxGenSignal::Stop);

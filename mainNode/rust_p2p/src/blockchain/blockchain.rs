@@ -49,7 +49,7 @@ impl BlockChain {
 
     pub fn replace(&mut self, chain: Vec<ContractState>) {
         self.blockchain = chain;
-        PERFORMANCE_COUNTER.store_chain_depth(self.blockchain.len());
+        //PERFORMANCE_COUNTER.store_chain_depth(self.blockchain.len());
     }
 
     // block id should start at 0, so is consistent with height

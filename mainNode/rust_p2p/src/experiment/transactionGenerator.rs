@@ -10,22 +10,34 @@ use crossbeam::channel::{self, Sender, Receiver, TryRecvError};
 use super::snapshot::PERFORMANCE_COUNTER;
 use chain::transaction::{Transaction, TransactionInput, TransactionOutput, OutPoint};
 use primitives::bytes::Bytes;
+use rand::distributions::WeightedIndex;
+use rand::distributions::Distribution;
+use rand::seq::SliceRandom;
+use std::time;
 
 use requests::{ToJson};
 use rand::Rng;
 
 pub enum TxGenSignal {
-    Start,
+    Start(u64),
     Stop,
     Step(usize),
     Simulate,
 }
 
 pub enum State {
-    Continuous,
+    Continuous(u64),
     Pause,
     Step(usize),
     Simulate,
+}
+
+pub enum  ArrivalDistribution {
+    Uniform(UniformArrival),
+}
+
+pub struct UniformArrival {
+    pub interval: u64, //us
 }
 
 pub struct TransactionGenerator {
@@ -35,6 +47,7 @@ pub struct TransactionGenerator {
     to_addr: Vec<H256>,
     state: State,
     total_tx: usize,
+    arrival_distribution: ArrivalDistribution,
 }
 
 impl TransactionGenerator {
@@ -47,6 +60,7 @@ impl TransactionGenerator {
             control: rx,
             state: State::Pause,
             total_tx: 0,
+            arrival_distribution: ArrivalDistribution::Uniform(UniformArrival { interval: 100 })
         };
         (transaction_gen, tx)
     }
@@ -54,6 +68,7 @@ impl TransactionGenerator {
     pub fn start(mut self) {
         let _ = thread::spawn(move || {
             loop {
+                let tx_gen_start = time::Instant::now();
                 match self.state {
                     State::Pause => {
                         let signal = self.control.recv().expect("Tx Gen control signal");
@@ -65,15 +80,14 @@ impl TransactionGenerator {
 
                         self.state = State::Pause;
                     },
-                    State::Continuous => {
+                    State::Continuous(throttle) => {
                         // create transaction according to some distribution
                         match self.control.try_recv() {
                             Ok(signal) => {
                                 self.handle_signal(signal);
                             },
                             Err(TryRecvError::Empty) => {
-                                let transaction = self.generate_trans(1);
-                                self.send_to_mempool(transaction);
+                                
                             },
                             Err(TryRecvError::Disconnected) => panic!("disconnected tx_gen control signal"),
                         }
@@ -82,8 +96,39 @@ impl TransactionGenerator {
                         let transactions= self.generate_transaction_from_history();
                         self.estimate_gas(transactions);
                         self.state = State::Pause;
+                        continue;
                     }
                 }
+                if let State::Continuous(throttle) = self.state {
+                    if self.mempool.lock().unwrap().len() as u64 >= throttle {
+                        // if the mempool is full, just skip this transaction
+                        let interval: u64 = match &self.arrival_distribution {
+                            ArrivalDistribution::Uniform(d) => d.interval,
+                        };
+                        let interval = time::Duration::from_micros(interval);
+                        thread::sleep(interval);
+                        continue;
+                    }
+                }
+
+                let transaction = self.generate_trans(1);
+                self.send_to_mempool(transaction);
+
+                // sleep interbal
+                let interval: u64 = match &self.arrival_distribution {
+                    ArrivalDistribution::Uniform(d) => d.interval,
+                };
+                let interval = time::Duration::from_micros(interval);
+                let time_spent = time::Instant::now().duration_since(tx_gen_start);
+                let interval = {
+                    if interval > time_spent {
+                        interval - time_spent
+                    } else {
+                        time::Duration::new(0, 0)
+                    }
+                };
+                thread::sleep(interval);
+
             }
         });
     }
@@ -98,7 +143,6 @@ impl TransactionGenerator {
 
     fn send_to_mempool(&mut self, transactions: Vec<Transaction>) {
         let mut mempool = self.mempool.lock().expect("tx gen lock mempool");
-        info!("insert {}  transaction", transactions.len());
         for tx in transactions {
             mempool.insert(tx);
         }
@@ -108,8 +152,8 @@ impl TransactionGenerator {
 
     pub fn handle_signal(&mut self, signal: TxGenSignal) {
         match signal {
-            TxGenSignal::Start => {
-                self.state = State::Continuous;
+            TxGenSignal::Start(t) => {
+                self.state = State::Continuous(t);
             },
             TxGenSignal::Stop => {
                 self.state = State::Pause;

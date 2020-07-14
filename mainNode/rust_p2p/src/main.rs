@@ -102,7 +102,6 @@ fn main() {
     for line in f.lines() {
         let line = line.expect("Unable to read line").to_string();
         if line != listen_socket.clone().to_string() {
-            println!("{:?} read neighbor {:?}", listen_socket, line);
             neighbors.push(line.to_string());
         }
     }
@@ -111,11 +110,9 @@ fn main() {
     for line in side_file.lines() {
         let line = line.expect("Unable to read line").to_string();
         if line != listen_socket.clone().to_string() {
-            println!("{:?} read neighbor {:?}", listen_socket, line);
             sidenodes.push(line.to_string());
         }
     }
-
 
     // get accounts
     let file = File::open(account_path).unwrap();
@@ -125,26 +122,26 @@ fn main() {
     let key: BLSKey = BLSKey::new(key_str);
     let api_socket: SocketAddr = ("127.0.0.1:".to_string() + &api_port).parse().unwrap();
 
-    info!("listen port {:?} {:?}", listen_port, account );
-
     // get main data structures 
     let block_db = Arc::new(Mutex::new(BlockDb::new()));
     let blockchain = Arc::new(Mutex::new(BlockChain::new()));
 
     let (task_sender, task_receiver) =cbchannel::unbounded();
     let is_scale_node: bool = (scale_id >= 0);
-    let (server, server_control_sender) = network::server::Context::new(
+
+    let (server_ctx, mut server_handle) = network::server::Context::new(
         task_sender.clone(), 
         listen_socket,
         is_scale_node,
     );
-    server.start();
+    server_ctx.start();
 
     let (contract_handle_sender, contract_handle_receiver) = cbchannel::unbounded();
     let (manager_handle_sender, manager_handle_receiver) = cbchannel::unbounded();
     let (schedule_handle_sender, schedule_handle_receiver) = cbchannel::unbounded();
-    let k_set: Vec<u64> = vec![32,16,8]; //512,256,128, 64
+    let k_set: Vec<u64> = vec![32,16,8];// vec![256,128,64]; //
     let (codes_for_encoding, codes_for_decoding) = read_codes(k_set.clone());
+    info!("codes_for_encoding lem {}", codes_for_encoding.len());
     let mempool = Arc::new(Mutex::new(Mempool::new(
                 contract_handle_sender.clone(),
                 schedule_handle_sender.clone(),
@@ -156,7 +153,7 @@ fn main() {
         account,
         key,
         task_sender.clone(),
-        server_control_sender.clone(),
+        server_handle.control_tx.clone(),
         contract_handle_receiver,
         mempool.clone(),
         blockchain.clone(),
@@ -167,7 +164,7 @@ fn main() {
     let manager = Manager::new(
             contract_handle_sender.clone(),
             blockchain.clone(),
-            server_control_sender.clone(),
+            server_handle.control_tx.clone(),
             listen_socket.clone(),
             manager_handle_receiver,
             block_db.clone(),
@@ -205,7 +202,7 @@ fn main() {
     let scheduler = Scheduler::new(
         listen_socket.clone(), 
         token, mempool.clone(), 
-        server_control_sender.clone(), 
+        server_handle.control_tx.clone(), 
         schedule_handle_receiver.clone(), 
         blockchain.clone(),
         contract_handle_sender.clone()
@@ -227,7 +224,7 @@ fn main() {
         key_path.to_string(),
             scale_id,
         threshold,
-        server_control_sender.clone(),
+        server_handle.control_tx.clone(),
         manager_handle_sender.clone(),
     );
     performer.start();
@@ -245,65 +242,28 @@ fn main() {
         block_db.clone(),
     );
 
+    info!("{:?} -> {:?}", listen_socket, neighbors);
 
     let mut num_connected = 0;
     for neighbor in neighbors.iter() {
-        let (sender, receiver) = mpsc::channel();
-        let connect_handle = ConnectHandle {
-            result_sender: sender,
-            dest_addr: neighbor.clone(),
-        };
-        let mut attempt = 0;
+        let addr: SocketAddr = neighbor.parse().unwrap();
         loop {
-            attempt += 1;
-            info!("{} send ServeSignal::ServerConnect to {:?}. attempt {}", listen_socket, neighbor, attempt);
-            server_control_sender.send(ServerSignal::ServerConnect(connect_handle.clone()));           
-            match receiver.recv() {
-                Ok(result) => {
-                    match result {
-                        ConnectResult::Success => {
-                            info!("connect success");
-                            break;
-                        },
-                        ConnectResult::Fail => {
-                            info!("ConnectResult::Fail {:?}", neighbor);
-                        },
-                    } 
+            match server_handle.connect(addr) {
+                Ok(_) => {
+                    info!("{} -> {}", &listen_socket, &addr);
+                    break;
                 },
-                Err(e) => info!("receive error {:?}", e),
+                Err(e) => {
+                    error!(
+                        "Error connecting to peer {}, retrying in one second: {}",
+                        addr, e
+                    );
+                    thread::sleep(time::Duration::from_millis(1000));
+                    continue;
+                }
             }
-            let sleep_time = time::Duration::from_millis(500);
-            thread::sleep(sleep_time);
         }
     }
-
-
-    //server_control_sender.send(ServerSignal::ServerConnect(connect_handle.clone()));
-   
-
-    /*
-    let mut text_i = 0;
-    loop {
-        if true {
-            text_i += 1;
-            let text = String::from("hello") + &(text_i).to_string(); 
-            let performer_message = Message::Ping(text);
-            let control_message = ServerSignal::ServerBroadcast(performer_message);
-            server_control_sender.send(control_message).expect("broadcast to peer");
-
-            // web 3
-            // 1. interact with smartContract
-             
-            // 2. Broadcast to all peers
-
-            
-            // sleep
-            let num = rand::thread_rng().gen_range(0, 5000);
-            let sleep_time = time::Duration::from_millis(1000); //num
-            thread::sleep(sleep_time);
-        }
-    }
-    */
     thread::park();
 }
 
