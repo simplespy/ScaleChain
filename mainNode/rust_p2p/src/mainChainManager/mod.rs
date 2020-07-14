@@ -296,7 +296,7 @@ impl Manager {
                 // check state every  sec
                 if start.elapsed().unwrap() > time::Duration::from_millis(2000) {
                     //check current state
-                    info!("{:?} check smart contract", self.addr);
+                    //info!("{:?} check smart contract", self.addr);
                     start = SystemTime::now();
                     let (answer_tx, answer_rx) = channel::bounded(1);
                     let handle = Handle {

@@ -312,6 +312,7 @@ impl Performer {
                                     // vote
                                     let header_str: String = hex::encode(&header);
                                     //utils::_generate_random_header();
+                                  //  let header_str = "deadbeef".to_string();
                                     
                                     let (sigx, sigy) = utils::_sign_bls(header_str.clone(), keyfile);
                                     let sid = 0;
