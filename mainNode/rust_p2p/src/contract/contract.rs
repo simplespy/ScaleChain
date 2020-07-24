@@ -208,7 +208,7 @@ impl Contract {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*200,
             gas: _convert_u256(gas),
             data: function_abi
         };
@@ -232,7 +232,7 @@ impl Contract {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*200,
             gas: ethereum_types::U256::from(950000),
             data: function_abi
         };
@@ -263,7 +263,7 @@ impl Contract {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*200,
             gas: _convert_u256(gas),
             data: function_abi
         };
@@ -458,7 +458,7 @@ impl Contract {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*200,
             gas: _convert_u256(gas),
             data: function_abi
         };
