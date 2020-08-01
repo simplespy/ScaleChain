@@ -10,6 +10,7 @@ use crypto::dhash256;
 use hash::H256;
 use constants::{SEQUENCE_FINAL, LOCKTIME_THRESHOLD};
 use ser::{Error, Serializable, Deserializable, Stream, Reader};
+use rand::Rng;
 
 /// Must be zero.
 const WITNESS_MARKER: u8 = 0;
@@ -33,6 +34,14 @@ impl OutPoint {
 	pub fn is_null(&self) -> bool {
 		self.hash.is_zero() && self.index == u32::max_value()
 	}
+
+    pub fn random() -> Self {
+        let mut rng = rand::thread_rng();
+        OutPoint {
+			hash: H256::default(),
+			index: rng.gen(),
+		}
+    }
 }
 
 #[derive(Debug, PartialEq, Default, Clone)]

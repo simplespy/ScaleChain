@@ -63,5 +63,5 @@ macro_rules! big_array {
 }
 
 big_array! {
-    256,
+    256,1024,32768, 65536,
 }

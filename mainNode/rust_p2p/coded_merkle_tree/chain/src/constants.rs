@@ -24,14 +24,16 @@ pub const LOCKTIME_THRESHOLD: u32 = 500000000; // Tue Nov  5 00:53:20 1985 UTC
 /// Number of Satoshis in single coin
 pub const SATOSHIS_IN_COIN: u64 = 100_000_000;
 
+pub const UNDECODABLE_RATIO: f32 = 0.9; // > 1 - 0.124
+
 
 //Configuration file for construction of coded Merkle tree
 
 //size of transactions in a block in bytes
-pub const BLOCK_SIZE: u64 = 4800;//10000;//131072; 40000 65535 4800
+pub const BLOCK_SIZE: u64 = 4194304;//65536;//;16384  131072//131072;//131072;//;//131072; //32768;//10000;//131072; 40000 65535 4800 65535
 
 //size of a symbol on the base layer in bytes
-pub const BASE_SYMBOL_SIZE: usize = 256;
+pub const BASE_SYMBOL_SIZE: usize = 32768;//32768;//1024;//32768;//1024;
 
 //number of hashes to aggregate to form a new symbol on the upper layers of CMT
 pub const AGGREGATE: usize = 8;
@@ -39,8 +41,10 @@ pub const AGGREGATE: usize = 8;
 //coding rate for code ensemble
 pub const RATE: f32 = 0.25;
 
+pub const NUM_BASE_SYMBOL: u64 = (BLOCK_SIZE/(BASE_SYMBOL_SIZE as u64)) * ((1.0/RATE) as u64);
+
 //number of hashes of coded symbols stored in the block header 
-pub const HEADER_SIZE: u32 = 32; //256
+pub const HEADER_SIZE: u32 = 16;
 
 //number of times to sample the base symbols of the CMT
 pub const NUMBER_ITERATION: u32 = 10;

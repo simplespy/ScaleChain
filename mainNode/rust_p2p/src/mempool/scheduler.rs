@@ -26,13 +26,19 @@ pub struct Token {
     pub node_list: Vec<SocketAddr>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Signal {
+    Data(Token),
+    Control,
+}
+
 pub struct Scheduler {
     pub socket: SocketAddr,
     pub token: Option<Token>,
     pub mempool: Arc<Mutex<Mempool>>,
     pub server_control_sender: MioSender<ServerSignal>,
     pub contract_handler: Sender<Handle>,
-    pub handle: Receiver<Option<Token>>,
+    pub handle: Receiver<Signal>,
     pub chain: Arc<Mutex<BlockChain>>, 
 }
 
@@ -42,7 +48,7 @@ impl Scheduler {
         token: Option<Token>,
         mempool: Arc<Mutex<Mempool>>,
         server_control_sender: MioSender<ServerSignal>,
-        handle: Receiver<Option<Token>>,
+        handle: Receiver<Signal>,
         chain: Arc<Mutex<BlockChain>>,
         contract_handler: Sender<Handle>,
     ) -> Scheduler {
@@ -74,20 +80,20 @@ impl Scheduler {
         let _ = std::thread::spawn(move || {
             loop {
                 match self.handle.recv() {
-                    // mempool query
                     Ok(v) => {
                         match v {
-                            None => {
+                            Signal::Control => {
+                                // try transmit
                                 match self.token.as_mut() {
                                     None => (),
                                     Some(token) => {
-                                        info!("with token, propose a block");
+                                        //info!("with token, propose a block");
                                         self.propose_block();
                                     },
                                 }
                             },
-                            Some(token) => {
-                                info!("reiceive a token, propose a block");
+                            Signal::Data(token) => {
+                                //info!("reiceive a token, propose a block");
                                 self.token = Some(token);
                                 self.propose_block();
                             }
@@ -97,29 +103,41 @@ impl Scheduler {
                 }
             }
         });
-    } 
-     
+    }
+
+
+    fn pass_token(&mut self, token: Token) {
+        info!("{:?} passing token.", self.socket);
+        if token.ring_size >= 2 {
+            let mut index = 0;
+            for sock in &token.node_list {
+                if *sock == self.socket {
+                    let next_index = (index + 1) % token.ring_size;
+                    let next_sock = token.node_list[next_index];
+                    let message = Message::PassToken(token);
+                    let signal = ServerSignal::ServerUnicast((next_sock, message));
+                    self.server_control_sender.send(signal);
+                    break;
+                }
+                index = (index + 1) % token.ring_size;
+            }
+        }
+    }
+
 
     pub fn propose_block(&mut self) -> bool {
-        // pass token, drop token
-        if let Some(ref mut token) = self.token {
-            info!("{:?} scheduler propose block", self.socket);
+        if let Some(ref token) = self.token {
+            let start = SystemTime::now();
+
+            // generate a coded block
             let mut mempool = self.mempool.lock().unwrap();
             let header = match mempool.prepare_cmt_block() {
                 Some(h) => h,
                 None => return false,
             };
-            info!("{:?} mempool create block finish", self.socket);
             drop(mempool);
             let header_bytes = serialize(&header);
-
-            let header_message: Vec<u8> = header_bytes.clone().into(); //
-            //let back: BlockHeader = deserialize(&header_message as &[u8]).unwrap();
-
-            // get block id from smart contract
-            //let chain = self.chain.lock().unwrap();
-            //let tip_state = chain.get_latest_state().unwrap();
-            //drop(chain);
+            let header_message: Vec<u8> = header_bytes.clone().into();
 
             // get curr state
             let (answer_tx, answer_rx) = channel::bounded(1);
@@ -145,21 +163,19 @@ impl Scheduler {
                 }, 
             };
             
-
-            // broadcast block to scalenode
-            //let random_header = utils::_generate_random_header();
+            // construct message and broadcast 
             let new_block_id =  tip_state.block_id + 1;
             let hash_str = utils::hash_header_hex(&header_message);
-            info!("propose block {} {:?}", new_block_id, hash_str);
-            
-
             let message =  Message::ProposeBlock((header_message, new_block_id)); 
             let signal = ServerSignal::ServerBroadcast(message);
             self.server_control_sender.send(signal);
-            let start = SystemTime::now();
 
+            let sleep_time = time::Duration::from_millis(1000);
+                thread::sleep(sleep_time);
 
-            // new side chain message
+            let chain = self.chain.lock().unwrap();
+            let tip_state = chain.get_latest_state().unwrap();
+            drop(chain);
 
             loop {
                 // Pass token
@@ -170,31 +186,13 @@ impl Scheduler {
                 let tip_state = chain.get_latest_state().unwrap();
                 drop(chain);
 
-
                 if tip_state.block_id == new_block_id {
                     let elapsed = start.elapsed();
-                    info!("{:?} passing token. time taken {:?}", self.socket, elapsed);
-                    if token.ring_size >= 2 {
-                        let mut index = 0;
-                        for sock in &token.node_list {
-                            if *sock == self.socket {
-                                let next_index = (index + 1) % token.ring_size;
-                                //info!("next_index {}", next_index);
-                                let next_sock = token.node_list[next_index];
-                                //info!{"next sock {:?}", next_sock};
-                                let message = Message::PassToken(token.clone());
-                                let signal = ServerSignal::ServerUnicast((next_sock, message));
-                                self.server_control_sender.send(signal);
-                                break;
-                            }
-                            index = (index + 1) % token.ring_size;
-                        }
-                    }
-                    break;
+                    self.pass_token(token.clone());
+                    self.token = None;
+                    return true;
                 }
             }
-            self.token = None;
-            return true;
         } else {
             return false;
         }

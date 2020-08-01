@@ -102,17 +102,13 @@ impl Context {
         let (peer_context, handle) = PeerContext::new(socket, direction).unwrap();
         let local_token = Token(self.token_counter);
         self.token_counter += 1;
-
         self.poll.register(
             &peer_context.writer.queue,
             local_token,
             Ready::readable(),
             PollOpt::edge() | mio::PollOpt::oneshot(),
         ).unwrap();
-
         self.peers.insert(network_token, peer_context);
-        
-        info!("{} registered peer {}, peer token {}, local token {}", self.local_addr, peer_addr, network_token.0, local_token.0); 
         Ok(network_token)
     }
 
@@ -128,7 +124,6 @@ impl Context {
             }
         };
         let stream = TcpStream::from_stream(tcp_stream)?;
-        info!("{} connected to {} : {}", self.local_addr, addr, stream.local_addr().unwrap());
         let network_token = self.register_peer(stream, PeerDirection::Outgoing).unwrap();
         connect_handle.result_sender.send(ConnectResult::Success);
         Ok(())
@@ -291,7 +286,7 @@ impl Context {
                             match listener.accept() { 
                                 Ok((socket, socket_addr)) => {
                                     match self.register_peer(socket, PeerDirection::Incoming) {
-                                        Ok(_) => info!("connected to incoming peer {}", socket_addr),
+                                        Ok(_) => (),
                                         Err(e) => {
                                             error!("Error initializaing incoming peer {}: {}", socket_addr, e);
                                         }

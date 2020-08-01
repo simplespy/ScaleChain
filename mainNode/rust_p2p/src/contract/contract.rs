@@ -222,7 +222,7 @@ impl Contract {
     }
 
     pub fn submit_vote(&self, str_block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) {
-        //info!("{:?} submit vote", self.ip_addr);
+        info!("{:?} submit vote", self.ip_addr);
         let nonce = self._transaction_count();
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let function_abi = _encode_submitVote(str_block, sid, bid, sigx, sigy, bitset);
@@ -243,7 +243,7 @@ impl Contract {
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         //info!("ETH_CHAIN_ID {} signed tx {:?}", ETH_CHAIN_ID, signed_tx);
         let tx_hash = self._send_transaction(signed_tx);
-        info!("{:?} submitted vote", self.ip_addr);
+        //info!("{:?} submitted vote", self.ip_addr);
         if self.get_tx_receipt(tx_hash) {
             println!("success tx_hash = {:?}", tx_hash);
         }
@@ -479,7 +479,6 @@ impl Contract {
     }
 
     fn _transaction_count(&self) -> U256 {
-        info!("self.my_account.address {:?}", self.my_account.address);
         self.web3.eth()
             .transaction_count(self.my_account.address, None)
             .wait()

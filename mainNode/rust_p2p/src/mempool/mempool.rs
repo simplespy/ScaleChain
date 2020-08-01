@@ -15,21 +15,56 @@ use super::cmtda::Block as CMTBlock;
 use super::cmtda::Transaction;
 use super::cmtda::H256 as CMTH256;
 
-use super::cmtda::{BlockHeader, BLOCK_SIZE, HEADER_SIZE, read_codes};
+use super::cmtda::{BlockHeader, HEADER_SIZE, read_codes};
 use chain::decoder::{Code, Decoder, TreeDecoder, CodingErr, IncorrectCodingProof};
 use chain::decoder::{Symbol};
+use chain::constants::{BLOCK_SIZE, BASE_SYMBOL_SIZE, RATE};
 use primitives::bytes::{Bytes};
 use ser::{deserialize, serialize};
 use std::net::{SocketAddr};
 use rand::Rng;
 use std::time::{SystemTime, UNIX_EPOCH};
+use merkle;
+use ring::digest::{Algorithm, Context, SHA256};
+use merkle::{Hashable, MerkleTree, Proof};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use crate::mempool::scheduler;
+#[allow(non_upper_case_globals)]
+static algorithm: &'static Algorithm = &SHA256;
 
+//struct Sample {
+    //symbols: Vec<Vec<Symbols>>,
+    //indices: Vec<Vec<u64>>,
+//}
+
+//impl Sample {
+    //fn merge(&mut self, s: &Sample) {
+        //let num_layer = self.symbols.len();
+        //for l in 0..num_layer {
+            //let symbols_l = &s.symbols[l];
+            //let idx_l= &s.idx[l];
+            //let mut c_symbols = &mut self.symbols[l];
+            //let mut c_idx = &mut self.indices[l];
+            //let mut j = 0;
+            //for i in idx {
+                //if c_idx.contains(i) {
+                    ////
+                //} else {
+                    //c_idx.push(*i);
+                    //c_symbols.push(symbols[j]);
+                //}
+                //j += 1;
+            //}
+        //}
+    //}
+//}
 
 pub struct Mempool {
     transactions: VecDeque<Transaction>,
     block_size: usize,
     contract_handler: Sender<Handle>,
-    schedule_handler: Sender<Option<Token>>,
+    schedule_handler: Sender<scheduler::Signal>,
     returned_blocks: VecDeque<Block>,
     cmt_block: Option<CMTBlock>,
     addr: SocketAddr,
@@ -40,7 +75,7 @@ pub struct Mempool {
 impl Mempool {
     pub fn new(
         contract_handler: Sender<Handle>,
-        schedule_handler: Sender<Option<Token>>,
+        schedule_handler: Sender<scheduler::Signal>,
         addr: SocketAddr,
         codes_for_encoding: Vec<Code>,
         codes_for_decoding: Vec<Code>,
@@ -70,11 +105,6 @@ impl Mempool {
 
     pub fn change_mempool_size(&mut self, size: usize) {
         self.block_size = size;
-        
-
-        if self.transaction_size_in_bytes() >= self.block_size {
-            self.send_block();
-        }
     }
 
     pub fn get_num_transaction(&self) -> usize {
@@ -92,20 +122,23 @@ impl Mempool {
         match &self.cmt_block {
             None => panic!("I don't have cmt block"),
             Some(cmt_block) => {
-                //info!("{:?} sample cmt of size {}", self.addr, sample_idx.len());
-                //info!("{:?} header {:?}", self.addr, cmt_block.block_header);
-                //info!("{:?} transactions {:?}", self.addr, cmt_block.transactions);
+                let num = sample_idx.len();
+                let (mut symbols, mut idx) = cmt_block.sample_vec(sample_idx);
 
-                let (mut symbols, mut idx) = cmt_block.sampling_to_decode(1000 as u32); //sample_idx.len()
-                info!("{:?} idx len {:?}", self.addr, idx.len());
-                info!("{:?} symbols len {:?}", self.addr, symbols.len());
-                // tests 
-                //info!("{:?} after reading code, len {} {}", self.addr, self.codes_for_encoding.len(), self.codes_for_decoding.len());
-                //info!("{:?} before constructing tree decoder", self.addr);
-                //let mut decoder: TreeDecoder = TreeDecoder::new(self.codes_for_decoding.to_vec(), &cmt_block.block_header.coded_merkle_roots_hashes);
-                //info!("{:?}, treedecoder n {} height {}", self.addr, decoder.n, decoder.height);
-                //match decoder.run_tree_decoder(symbols.clone(), idx.clone()) {
-                    //Ok(()) => (),
+                //info!("{:?}, symbols {:?}", self.addr, symbols);
+                //info!("{:?}, idx     {:?}", self.addr,idx);
+
+                let mut decoder: TreeDecoder = TreeDecoder::new(
+                    self.codes_for_decoding.to_vec(), 
+                    &cmt_block.block_header.coded_merkle_roots_hashes
+                );
+
+                //info!("{:?}, test treedecoder n {} height {}", self.addr, decoder.n, decoder.height);
+                //match decoder.run_tree_decoder(symbols.clone(), idx.clone(), cmt_block.block_header.clone()) {
+                    //Ok(transactions) => {
+                        //println!("transactions {:?}", transactions);
+
+                    //},
                     //_ => info!("tree decoder error"),
                 //};
                 //info!("{:?} after calling tree decoder", self.addr);
@@ -122,32 +155,8 @@ impl Mempool {
         }
     }
 
-    pub fn prepare_cmt_block(&mut self) -> Option<BlockHeader> {
-        if self.transactions.len() == 0 {
-            info!("{:?} no transaction", self.addr); 
-            return None;
-        }
-
-        info!("{:?} prepare header", self.addr); 
-        // get CMT
-        let mut rng = rand::thread_rng();
-        let header = BlockHeader {
-            version: 1,
-            previous_header_hash: CMTH256::default(),
-            merkle_root_hash: CMTH256::default(),
-            time: 4u32,
-            bits: 5.into(),
-            nonce: rng.gen(),
-            coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
-        };
-        // CMT - propose block
-        let transaction_size = Transaction::bytes(&self.transactions[0]).len();
-        info!("{:?} transaction_size {:?}", self.addr, transaction_size);
-
-        let mut transactions: Vec<Transaction> = Vec::new();
+    pub fn package_trans(&mut self, transactions: &mut Vec<Transaction>) {
         let tx_bytes_size = self.transaction_size_in_bytes();
-
-        // need to truncate 
         if tx_bytes_size > self.block_size {
             let mut s = 0;
             for i in 0..self.transactions.len() {
@@ -161,7 +170,6 @@ impl Mempool {
                     transactions.push(self.transactions[i].clone());
                 }
             }
-
             for _ in 0..transactions.len() {
                 self.transactions.pop_front();
             }
@@ -170,31 +178,47 @@ impl Mempool {
                 transactions.push(tx.clone());
             }
             self.transactions.clear();
+        }
+        //let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
+        //let mut total_size = 0;
+        //for tx in &trans_byte {
+            //total_size +=  tx.len();
+        //}
+    }
 
+    pub fn prepare_cmt_block(&mut self) -> Option<BlockHeader> {
+        if self.transactions.len() == 0 {
+            info!("{:?} no transaction", self.addr); 
+            return None;
         }
 
-        let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
-        let mut total_size = 0;
-        for tx in &trans_byte {
-            total_size +=  tx.len();
-        }
-        info!("{:?} total_size {}  hello {:?}, codes_for_encoding len {}", self.addr, transactions.len(), total_size, self.codes_for_encoding.len()); 
+        // get CMT
+        let header = BlockHeader {
+            version: 1,
+            previous_header_hash: CMTH256::default(),
+            merkle_root_hash: CMTH256::default(),
+            time: 4u32,
+            bits: 5.into(),
+            nonce: 0,//rng.gen(),
+            coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
+            delimitor: vec![],
+        };
+        // CMT - propose block
+        // let transaction_size = Transaction::bytes(&self.transactions[0]).len();
+        // info!("{:?} transaction_size {:?}", self.addr, transaction_size);
+
+        let mut transactions: Vec<Transaction> = Vec::new();
+        self.package_trans(&mut transactions);
 
         let start = SystemTime::now();
-        let block: CMTBlock = CMTBlock::new(
+        let (block, trans_len) = CMTBlock::new(
             header.clone(), 
             &transactions, 
             BLOCK_SIZE as usize, 
             HEADER_SIZE, 
             &self.codes_for_encoding, 
-            vec![true; self.codes_for_encoding.len()]);
-
-        info!("codes_for_encoding len {}", self.codes_for_encoding.len());
-        info!("{:?} cmt block construction time {:?}", self.addr, start.elapsed()); 
-        info!("{:?} self.codes_for_encoding len {}", self.addr, self.codes_for_encoding.len()); 
-        //let (mut symbols, mut idx) = block.sampling_to_decode(100 as u32); //sample_idx.len()
-        //info!("{:?} symbols {} {:?}", self.addr, symbols.len(), symbols); 
-        //info!("{:?} idx {} {:?}", self.addr, idx.len(),  idx); 
+            vec![true; self.codes_for_encoding.len()]
+        );
 
         let cmt_header = block.block_header.clone();
         self.cmt_block = Some(block);
@@ -206,80 +230,106 @@ impl Mempool {
         self.transactions.len()
     }
 
-    pub fn prepare_block(&mut self) -> Option<Block> {
-        if self.transactions.len() == 0 {
-            return None;
-        }
-
-        let mut transactions: Vec<Transaction> = Vec::new();
-        //assert!(self.transactions.len() >= self.block_size);
-        for _ in 0..self.block_size {
-            let tx = self.transactions.pop_front().expect("mempool prepare block");
-            transactions.push(tx);
-        }
-
-
-
-        return Some(Block {
-            header: Header::default(),
-            transactions: vec![],
-        });
-
-    }
-
-    // desolete mempool should be called by scheduler
-    pub fn send_block(&mut self) {
-        // resend those blocks
-        while self.returned_blocks.len() != 0 {
-            match self.returned_blocks.pop_front() {
-                Some(block) => {
-                    //self._send_block(block);
-                },
-                None => (),
-            }
-        }
-        
-        let mut block = self.prepare_block().expect("send block");
-        //block.update_root();
-        //block.update_hash();
-
-        // send block to ethereum network
-        self._send_block(block);
-    }
-
-    fn _send_block(&self, block: Block) {
-        let message = Message::SendBlock(block);
-        let handle = Handle {
-            message: message,
-            answer_channel: None,
-        };
-        self.contract_handler.send(handle); 
-    }
-
-    pub fn insert(&mut self, transaction: Transaction) {
+    
+   pub fn insert(&mut self, transaction: Transaction) {
         self.transactions.push_back(transaction);
         let tx_bytes_size = self.transaction_size_in_bytes();
-        
 
         // need to truncate 
         if tx_bytes_size > 0 {//self.block_size {
-            self.schedule_handler.send(None);
+            self.schedule_handler.send(scheduler::Signal::Control);
         }
     }
 
     pub fn estimate_gas(&mut self, transaction: Transaction) {
-        self.transactions.push_back(transaction);
-        if self.transactions.len() >= self.block_size {
-            let mut block = self.prepare_block().expect("send block");
-            //block.update_root();
-            block.update_hash();
-            let message = Message::EstimateGas(block);
-            let handle = Handle {
-                message: message,
-                answer_channel: None,
-            };
-            self.contract_handler.send(handle);
-        }
     }
 }
+
+
+
+    //pub fn prepare_block(&mut self) -> Option<BlockHeader> {
+        //if self.transactions.len() == 0 {
+            //return None;
+        //}
+
+        //let transaction_size = Transaction::bytes(&self.transactions[0]).len();
+        //info!("{:?} transaction_size {:?}", self.addr, transaction_size);
+
+        //let mut transactions: Vec<Transaction> = Vec::new();
+        //let mut transactions_bytes: Vec<Vec<u8>> = Vec::new();
+        //let tx_bytes_size = self.transaction_size_in_bytes();
+
+        //let start = SystemTime::now();
+        //// need to truncate 
+        //if tx_bytes_size > self.block_size {
+            //let mut s = 0;
+            //for i in 0..self.transactions.len() {
+                //let trans_byte = self.transactions[i].bytes();
+                //s += trans_byte.len();
+                //if s > self.block_size {
+                    //if self.transactions.len() == 0 {
+                        //panic!("single transaction too large, block size is insufficient");
+                    //}
+                    //break;
+                //} else {
+                    //transactions.push(self.transactions[i].clone());
+                    //transactions_bytes.push(trans_byte.to_vec());
+                //}
+            //}
+
+            //for _ in 0..transactions.len() {
+                //self.transactions.pop_front();
+            //}
+        //} else {
+            //for tx in &self.transactions {
+                //transactions.push(tx.clone());
+                //transactions_bytes.push(tx.bytes().to_vec());
+            //}
+            //self.transactions.clear();
+
+        //}
+
+        //let mut trans_byte = transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
+        //info!("{:?} copied  block {:?}", self.addr, start.elapsed()); 
+
+        //let merkle_tree = MerkleTree::from_vec(algorithm, transactions_bytes);
+        //info!("{:?} prepared merkle_tree {:?}", self.addr, start.elapsed()); 
+
+        //let root_hash = merkle_tree.root_hash();
+
+        //let cmt_root_hash: CMTH256 = root_hash[..].into();
+        ////info!("root_hash {:?}", root_hash);
+        ////let proof = merkle_tree.gen_proof(vec![0]).unwrap();
+
+        //let mut rng = rand::thread_rng();
+        //let header = BlockHeader {
+            //version: 1,
+            //previous_header_hash: CMTH256::default(),
+            //merkle_root_hash: cmt_root_hash,
+            //time: 4u32,
+            //bits: 5.into(),
+            //nonce: rng.gen(),
+            //coded_merkle_roots_hashes: vec![CMTH256::default(); 32],
+            //delimitor: vec![],
+        //};
+        ////
+        ////let f = File::open("t").expect("Unable to open file");
+        ////let f = BufReader::new(f);
+        ////let mut header_hex = "".to_string();
+        ////for line in f.lines() {
+            ////header_hex = line.expect("Unable to read line").to_string();
+        ////}
+
+        ////let header_bytes = hex::decode(&header_hex).unwrap();
+        ////let header: BlockHeader = deserialize(&header_bytes as &[u8]).unwrap();
+        //let block = CMTBlock {
+            //block_header: header.clone(),
+            //transactions: transactions,
+            //coded_tree: vec![], //Coded Merkle tree constructed from the transactions in the block
+            //block_size_in_bytes: 65535, // size of transactions in the block, used to specify block size for tests
+        //};
+
+        //self.cmt_block = Some(block);
+        //return Some(header);
+    //}
 

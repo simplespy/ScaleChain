@@ -107,6 +107,7 @@ impl TransactionGenerator {
                         };
                         let interval = time::Duration::from_micros(interval);
                         thread::sleep(interval);
+                        //info!("mempool is full >= throttle: {}", throttle);
                         continue;
                     }
                 }
@@ -198,7 +199,7 @@ impl TransactionGenerator {
             version: 0,
             inputs: vec![input],
             outputs: vec![output] ,
-            lock_time: rng.gen(),
+            lock_time: 0, //rng.gen(),
         };
         tx
     }

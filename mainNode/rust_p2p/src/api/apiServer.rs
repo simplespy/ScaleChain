@@ -173,12 +173,6 @@ impl ApiServer {
                             drop(mempool);
                             respond_result!(request, true, &num.to_string());
                         },
-                        "/contract/send-block" => {
-                            let mut mempool = rc.mempool.lock().expect("api send block");
-                            mempool.send_block();
-                            drop(mempool);
-                            respond_result!(request, true, "ok");
-                        },
                         "/contract/get-tx-receipt" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
                             let hash = match pairs.get("hash") {

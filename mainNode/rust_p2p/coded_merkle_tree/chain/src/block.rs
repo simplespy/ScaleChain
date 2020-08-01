@@ -5,12 +5,14 @@ use {BlockHeader, Transaction};
 use constants::{BASE_SYMBOL_SIZE, AGGREGATE, RATE};
 use {Symbols, SymbolBase, SymbolUp};
 use bytes::Bytes;
-use coded_merkle_roots::coded_merkle_roots;
+use coded_merkle_roots::{coded_merkle_roots, modular_code_merkle_roots};
 use hash::H256;
 use merkle_root::merkle_root;
 use decoder::{Code, Symbol};
 use rand::distributions::{Distribution, Bernoulli, Uniform};
 use CodingErr;
+use std::time::SystemTime;
+use std::collections::HashSet;
 
 //#[derive(Debug, PartialEq, Clone, Serializable, Deserializable)]
 #[derive(Clone)]
@@ -80,22 +82,36 @@ impl Block {
 	// construct a block 
 	// correct indicates if we will perform coding correctly or not on each level of the CMT
 	pub fn new(header: BlockHeader, transactions: &Vec<Transaction>, block_size: usize, header_size: u32, 
-		codes: &Vec<Code>, correct: Vec<bool>) -> Self {
+		codes: &Vec<Code>, correct: Vec<bool>) -> (Self, usize) {
 		// let block = Block {block_header: header.clone(), transactions: transactions.clone(), 
 		// coded_tree: vec![], block_size_in_bytes: block_size};
 
-		let block = Block {block_header: header.clone(), transactions: transactions.to_vec(), 
-			coded_tree: vec![], block_size_in_bytes: block_size};
+		let block = Block {
+            block_header: header.clone(), 
+            transactions: transactions.to_vec(), 
+			coded_tree: vec![], 
+            block_size_in_bytes: block_size
+        };
 		//Compute coded Merkle tree and hashes of the last layer from the transactions	
-		let (_, root_hashes, tree) = block.coded_merkle_roots(header_size, RATE, codes.to_vec(), correct);
-		let mut new_header = header;
+		let (trans_size, root_hashes, tree, delimitors) = block.coded_merkle_roots(header_size, RATE, codes.to_vec(), correct);
+		let mut new_header = header;// block.block_header.clone();
+        new_header.delimitor = delimitors;
+        //new_header.num_symbols 
+        
 		// Merkle root from transactions
 		// base unit is transaction
 		new_header.merkle_root_hash = block.merkle_root();
 		// Root hashes of CMT from transactions
 		// base unit is symbol
+        //println!("root_hashes {:?}", root_hashes);
 		new_header.coded_merkle_roots_hashes = root_hashes;
-		Block { block_header: new_header, transactions: transactions.to_vec(), coded_tree: tree, block_size_in_bytes: block_size}
+		let block = Block { 
+            block_header: new_header, 
+            transactions: transactions.to_vec(), 
+            coded_tree: tree, 
+            block_size_in_bytes: block_size
+        };
+        (block, trans_size)
 	}
 
 	/// Returns block's merkle root.
@@ -121,24 +137,32 @@ impl Block {
 
 	//Returns hashes of the symbols on the top layer of coded Merkle tree 
 	//#[cfg(any(test, feature = "test-helpers"))]
-	pub fn coded_merkle_roots(&self, header_size: u32, rate: f32, codes: Vec<Code>, correct: Vec<bool>) -> (usize, Vec<H256>, Vec<Symbols>) {
+	pub fn coded_merkle_roots(&self, header_size: u32, rate: f32, codes: Vec<Code>, correct: Vec<bool>) -> (usize, Vec<H256>, Vec<Symbols>, Vec<u32>) {
 		//Convert transactions into bytes and concatenate them into a Vec<u8>
+        let start = SystemTime::now(); 
 		let mut trans_byte = self.transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
+        let transaction_size = trans_byte.len();
+        let mut delimitor: Vec<u32> = vec![0];
 		let mut data: Vec<u8> = vec![];
 		for j in 0..trans_byte.len(){
 			data.append(&mut trans_byte[j].clone().into());
+            delimitor.push(data.len() as u32);
 		}
-
+        //self.block_header.len = delimitor;
 		let transactions_size_in_bytes = data.len();
 
 		//Append random data to meet target BLOCK_SIZE
+        let num_bytes = self.block_size_in_bytes - transactions_size_in_bytes;
 		if transactions_size_in_bytes < self.block_size_in_bytes {
-			for _ in 0..(self.block_size_in_bytes - transactions_size_in_bytes) {
-				let die = Uniform::from(0u8..=255u8);
-				let new_byte = die.sample(&mut rand::thread_rng());
-				data.push(new_byte);
+
+			for _ in 0..num_bytes {
+				//let die = Uniform::from(0u8..=255u8);
+				//let new_byte = die.sample(&mut rand::thread_rng());
+				data.push(1u8);//new_byte);
 			}
 		}
+        //println!("get block size {} {:?}", num_bytes, start.elapsed());
+        //println!("padded {} to block_size_in_bytes size {}", transactions_size_in_bytes, data.len());
 		//generate fake transaction data of size self.block_size_in_bytes bytes
 		// let mut data: Vec<u8> = vec![];
 		// for j in 0..self.block_size_in_bytes {
@@ -154,7 +178,8 @@ impl Block {
 			for i in 0..padding {
 				data.push(0x00);
 			}
-		} 
+		}
+        //println!("pad symbols size {:?}", data.len());
 		let k = data.len()/BASE_SYMBOL_SIZE;
 		let mut symbols: Vec<SymbolBase> = Vec::<SymbolBase>::with_capacity(k);
 		for l in 0..k {
@@ -163,8 +188,13 @@ impl Block {
 			symbols.push(symbol);
 		}
 		// construct CMT and the root hashes
-		let (roots, tree) = coded_merkle_roots(&symbols, header_size, rate, codes, correct);
-		(original_size, roots, tree)
+        //println!("convert to symbol start CMT construted root num {:?}", start.elapsed());
+        
+		//let (roots, tree) = coded_merkle_roots(&symbols, header_size, rate, codes, correct);
+        let (roots, tree) = modular_code_merkle_roots(&symbols, header_size, rate, codes, correct);
+
+        //println!("CMT construted root num {} {:?}", roots.len(), start.elapsed());
+		(transaction_size, roots, tree, delimitor)
 	}
 
 	//Returns a Merkle proof for some symbol index at some level of the coded merkle tree
@@ -201,6 +231,78 @@ impl Block {
 		}
 		(proof, proof_indices)
 	}
+
+    pub fn sample_vec(&self, base_idx: Vec<u32>) -> (Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
+        let num_layer = self.coded_tree.len();
+        let mut symbols_all_levels: Vec<Vec<Symbol>> = Vec::with_capacity(num_layer);
+		let mut indices_all_levels: Vec<Vec<u64>> = Vec::with_capacity(num_layer);
+		let reduce_factor = ((AGGREGATE as f32) * RATE) as u32;
+		let header_size = self.block_header.coded_merkle_roots_hashes.len();
+        //println!("coded tree size {}", self.coded_tree.len());
+
+        let mut layer_len = vec![];
+        for layer in self.coded_tree.iter() {
+            layer_len.push(layer.len());
+        }
+        for _ in 0..num_layer {
+            symbols_all_levels.push(vec![]);
+            indices_all_levels.push(vec![]);
+        }
+
+        let mut sampled = HashSet::new();
+
+        for i in base_idx {
+            let i = i as usize;
+            for j in 0..(num_layer) {
+                let layer = &self.coded_tree[j];
+                match layer {
+                    Symbols::Base(syms) => {
+                        if !sampled.contains(&(0, i)) {
+                            symbols_all_levels[j].push(Symbol::Base(syms[i].clone()));
+                            indices_all_levels[j].push(i as u64);
+                        }
+                    },
+                    Symbols::Upper(syms_up)  => {
+                        let len = layer_len[j];
+                        let sys_range = ((len as f32) *RATE) as usize;
+                        let par_range = len - sys_range;
+                        
+                        // choose systematic symbol
+                        let sys_index = i % sys_range;
+                        if !sampled.contains(&(j, sys_index)) {
+                            let sys_symbol = syms_up[sys_index as usize];
+                            //convert chosen_symbol to type "Symbol" 
+                            let mut sym_byte = [0u8; 32 * AGGREGATE];
+                            for t in 0..AGGREGATE {
+                                let temp: [u8; 32] = sys_symbol[t].clone().into();
+                                sym_byte[t * 32 .. (t+1) * 32].copy_from_slice(&temp);
+                            }
+
+                            symbols_all_levels[j].push(Symbol::Upper(sym_byte));
+                            indices_all_levels[j].push(sys_index as u64);
+                            sampled.insert((j, sys_index));
+                        }
+
+                        // choose parity symbol
+                        let par_index = (i % par_range) + sys_range;
+                        if !sampled.contains(&(j, par_index)) {
+                            let par_symbol = syms_up[par_index as usize];
+                            let mut sym_byte = [0u8; 32 * AGGREGATE];
+                            for t in 0..AGGREGATE {
+                                let temp: [u8; 32] = par_symbol[t].clone().into();
+                                sym_byte[t * 32 .. (t+1) * 32].copy_from_slice(&temp);
+                            }
+                            symbols_all_levels[j].push(Symbol::Upper(sym_byte));
+                            indices_all_levels[j].push(par_index as u64);
+                            sampled.insert((j, par_index));
+                        }
+                    },
+                }
+            }
+        }
+        (symbols_all_levels, indices_all_levels)
+    }
+
     
     //take s random symbols from the base layer, and their Merkle proofs as symbols from other layers
 	pub fn sampling_to_decode(&self, s: u32) -> (Vec<Vec<Symbol>>, Vec<Vec<u64>>) {

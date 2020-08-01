@@ -4,13 +4,13 @@ use std::sync::{Mutex, Arc};
 use std::collections::{HashMap};
 use super::cmtda::H256 as CMTH256;
 use chain::block::Block as SBlock;
-use super::network::message::{ChunkReply};
-
+use chain::constants::{NUM_BASE_SYMBOL};
+use super::network::message::{Samples};
 
 
 pub struct BlockDb {
     pub block_db: HashMap<H256, Block>, //curr_hash -> Block  not used
-    pub cmt_db: HashMap<usize, ChunkReply >,
+    pub cmt_db: HashMap<usize, Samples>,
     pub sblock_db: HashMap<usize, SBlock>,
 }
 
@@ -43,19 +43,21 @@ impl BlockDb {
          }
     }
 
-    pub fn insert_cmt_sample(&mut self, block_id: usize , chunk: &ChunkReply) {
+    // return if there is redundant elements
+    pub fn insert_cmt_sample(&mut self, block_id: usize , chunk: &Samples) -> bool {
         match self.cmt_db.get_mut(&block_id) {
-            Some(chunks) => {
-                warn!("chunk exists bid {:?} chunk {:?}", block_id, chunk);
-                self.cmt_db.insert(block_id, chunk.clone());
-            }
+            Some(symbols) => {
+                warn!("receive more than 1 samples block id {}", block_id); 
+                return false;
+            },
             None => {
                 self.cmt_db.insert(block_id, chunk.clone());
+                return true;
             }
         }
     }
 
-    pub fn get_chunk(&self, block_id: usize) -> Option<ChunkReply> {
+    pub fn get_chunk(&self, block_id: usize) -> Option<Samples> {
          match self.cmt_db.get(&block_id){
             Some(chunk) => Some(chunk.clone()),
             None => None,

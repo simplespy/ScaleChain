@@ -3,7 +3,7 @@ use super::contract::interface::{Handle, Answer};
 use super::primitive::block::ContractState;
 use std::{thread, time};
 use mio_extras::channel::Sender as MioSender;
-use super::network::message::{Message, ServerSignal, ChunkReply};
+use super::network::message::{Message, ServerSignal, Samples};
 use super::contract::interface::Message as ContractMessage;
 use super::contract::interface::Response as ContractResponse;
 use super::contract::utils;
@@ -16,6 +16,7 @@ use chain::block::Block as SBlock;
 use chain::decoder::CodingErr;
 use chain::decoder::{Symbol};
 use chain::decoder::{Code, Decoder, TreeDecoder, IncorrectCodingProof};
+use chain::constants::{NUM_BASE_SYMBOL, UNDECODABLE_RATIO};
 use super::cmtda::{read_codes, BlockHeader};
 use super::cmtda::Transaction as CMTTransaction;
 use primitives::bytes::{Bytes};
@@ -33,8 +34,8 @@ pub struct Manager {
     pub block_db: Arc<Mutex<BlockDb>>,
     pub server_control_sender: MioSender<ServerSignal>,
     pub addr: SocketAddr,
-    pub manager_sink: Receiver<(usize, Option<ChunkReply>)>,
-    pub chunk_senders: HashMap<usize, Sender<Option<ChunkReply>> >,
+    pub manager_sink: Receiver<(usize, Option<Samples>)>,
+    pub chunk_senders: HashMap<usize, Sender<Option<Samples>> >,
     pub codes_for_encoding: Vec<Code>,
     pub codes_for_decoding: Vec<Code>,
     pub k_set: Vec<u64>,
@@ -44,11 +45,17 @@ pub struct JobManager {
     state: ContractState,
     addr: SocketAddr,
     server_control_sender: MioSender<ServerSignal>,
-    chunk_receiver: Receiver<Option<ChunkReply>>,
+    chunk_receiver: Receiver<Option<Samples>>,
     block_source: Sender<Result<SBlock, CodingErr>>,
     codes_for_encoding: Vec<Code>,
     codes_for_decoding: Vec<Code>,
     k_set: Vec<u64>,
+}
+
+fn is_sufficient_symbols(tree_idx: &Vec<Vec<u64>>) -> bool {
+    assert!(tree_idx.len() > 0);
+    let len = tree_idx[0].len() as f32;
+    len > NUM_BASE_SYMBOL as f32 * UNDECODABLE_RATIO
 }
 
 // currently only handle one layer encoding
@@ -73,8 +80,6 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                         info!("{:?} get hash_str  {:?} {:?}", job_manager.addr, hash_str, elapsed);
                         let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();
 
-                        
-                                                
                         let num_layer = job_manager.k_set.len();
                         if is_first_recv {
                             is_first_recv = false;
@@ -101,48 +106,45 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                             }
                         }
 
-                        
-                        //info!("recon len {}", recon.len());
-                        //info!("{:?}", hex::encode(recon));
-                        
-                        // accumulate chunks + currently only handle single layer
-                        let mut decoder: TreeDecoder = TreeDecoder::new(
-                            job_manager.codes_for_decoding.to_vec(), 
-                            &header.coded_merkle_roots_hashes);
-                        let mut cmt_pass = match decoder.run_tree_decoder(coll_symbols.clone(), coll_idx.clone()) {
-                            Ok(()) => true,
-                            _ => false,
-                        };
-                        if cmt_pass {
-                            info!("{:?} cmt pass", job_manager.addr);
-                            // collect all base + reconstruct block
-                            let mut recon:Vec<u8> = vec![];
-                            let systematic_symbol_len = job_manager.k_set[0];
-                            for i in 0..systematic_symbol_len {
-                                for j in 0..(coll_symbols[0].len()) {
-                                    if coll_idx[0][j] == i as u64 {
-                                        match coll_symbols[0][j] {
-                                            Symbol::Base(s) => recon.extend_from_slice(&s),
-                                            _ => unreachable!(),
+                        if is_sufficient_symbols(&coll_idx) {
+                            // accumulate chunks + currently only handle single layer
+                            let mut decoder: TreeDecoder = TreeDecoder::new(
+                                job_manager.codes_for_decoding.to_vec(), 
+                                &header.coded_merkle_roots_hashes
+                            );
+
+                            let start = SystemTime::now();
+                            match decoder.run_tree_decoder(coll_symbols.clone(), coll_idx.clone(), header.clone()) {
+                                Ok(transactions) => {
+                                    info!("{:?} cmt pass decoding time {:?}", job_manager.addr, start.elapsed());
+                                    // collect all base + reconstruct block
+                                    let mut recon:Vec<u8> = vec![];
+                                    let systematic_symbol_len = job_manager.k_set[0];
+                                    for i in 0..systematic_symbol_len {
+                                        for j in 0..(coll_symbols[0].len()) {
+                                            if coll_idx[0][j] == i as u64 {
+                                                match coll_symbols[0][j] {
+                                                    Symbol::Base(s) => recon.extend_from_slice(&s),
+                                                    _ => unreachable!(),
+                                                }
+                                            }
                                         }
                                     }
-                                }
-                            }
-                            // convert bytes into vec<transaction>
-                            //info!("{:?} vec<tx> {:?}", self.addr, recon);
-                            // TODO
-                            let mut r = SBlock {
-                                block_header: header.clone(),
-                                transactions: vec![],
-                                coded_tree: vec![],
-                                block_size_in_bytes:0 
-                            };
+                                    // TODO
+                                    let mut r = SBlock {
+                                        block_header: header.clone(),
+                                        transactions: transactions,
+                                        coded_tree: vec![],
+                                        block_size_in_bytes:0 
+                                    };
 
-                            job_manager.block_source.send(Ok(r));
-                        } else {
-                            info!("{:?} cmt invalid", job_manager.addr);
-                            // error handle
+                                    job_manager.block_source.send(Ok(r));
+                                },
+                                Err(proof) => (),
+                            };
                         }
+
+                        
                     }
                 }
             }
@@ -157,7 +159,7 @@ impl Manager {
         chain: Arc<Mutex<BlockChain>>,
         server_control_sender: MioSender<ServerSignal>,
         addr: SocketAddr,     
-        manager_sink: Receiver<(usize, Option<ChunkReply>)>,
+        manager_sink: Receiver<(usize, Option<Samples>)>,
         block_db: Arc<Mutex<BlockDb>>,
         codes_for_encoding: Vec<Code>,
         codes_for_decoding: Vec<Code>,

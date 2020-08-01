@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::str;
 
 extern crate rustc_hex as hex;
@@ -27,6 +27,7 @@ use chain::constants::{BLOCK_SIZE, BASE_SYMBOL_SIZE, AGGREGATE, RATE, HEADER_SIZ
 use chain::coded_merkle_roots::{Symbols, SymbolBase, SymbolUp, coded_merkle_roots};
 use chain::merkle_root::merkle_root;
 use chain::decoder::{Code, Symbol, Decoder, TreeDecoder, CodingErr, IncorrectCodingProof};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // obtain a code represented by symbols from the form represented by parities
 fn convert_parity_to_symbol(parities: Vec<Vec<u64>>, n: u64) -> Vec<Vec<u64>> {
@@ -43,11 +44,13 @@ fn convert_parity_to_symbol(parities: Vec<Vec<u64>>, n: u64) -> Vec<Vec<u64>> {
 fn read_code_from_file(k: u64) -> (Code, Code) {
     //compute number of coded symbols
 	let n = ((k as f32) / RATE ) as u64;
-
+    
 	//Read encoding matrix
-	let filename = String::from("chain/src/LDPC_codes/k=") + &k.to_string() + &String::from("_encode.txt");
+    let curr_dir = std::env::current_dir().unwrap().to_str().unwrap().to_string();
+	let filename = String::from("LDPC_codes/k=") + &k.to_string() + &String::from("_encode.txt");
+    let filename = curr_dir.clone() + "/" + &filename;
     // Open the file in read-only mode (ignoring errors).
-    let file = File::open(filename).unwrap();
+    let file = File::open(filename).expect("unable to read file");
     let reader = BufReader::new(file);
     
     //parity equations for encoding
@@ -59,7 +62,8 @@ fn read_code_from_file(k: u64) -> (Code, Code) {
     }
 
     //Read decodeing matrix
-    let filename = String::from("chain/src/LDPC_codes/k=") + &k.to_string() + &String::from("_decode.txt");
+    let filename = String::from("LDPC_codes/k=") + &k.to_string() + &String::from("_decode.txt");
+    let filename = curr_dir + "/" + &filename;
     // Open the file in read-only mode (ignoring errors).
     let file = File::open(filename).unwrap();
     let reader = BufReader::new(file);
@@ -102,18 +106,18 @@ fn read_codes(k_set: Vec<u64>) -> (Vec<Code>, Vec<Code>) {
 	(codes_for_encoding, codes_for_decoding)
 }
 
-fn test(block: &Block, num_samples: &Vec<u32>, codes_for_decoding: &Vec<Code>) -> Vec<Result<(), IncorrectCodingProof>> {
-	let mut decoding_results = vec![];
-	//Try different sample sizes to decode
-	for s in num_samples.iter() {
-		//initiate the decoder for coded Merkle tree
-		let mut decoder: TreeDecoder = TreeDecoder::new(codes_for_decoding.to_vec(), &block.block_header.coded_merkle_roots_hashes);
-        //take s symbols with replacement unifromly at random from the base layer of CMT
-		let (symbols_all_levels, indices_all_levels) = block.sampling_to_decode(*s);
-		decoding_results.push(decoder.run_tree_decoder(symbols_all_levels, indices_all_levels));
-	}
-	decoding_results
-}
+//fn test(block: &Block, num_samples: &Vec<u32>, codes_for_decoding: &Vec<Code>) -> Vec<Result<(), IncorrectCodingProof>> {
+	//let mut decoding_results = vec![];
+	////Try different sample sizes to decode
+	//for s in num_samples.iter() {
+		////initiate the decoder for coded Merkle tree
+		//let mut decoder: TreeDecoder = TreeDecoder::new(codes_for_decoding.to_vec(), &block.block_header.coded_merkle_roots_hashes);
+        ////take s symbols with replacement unifromly at random from the base layer of CMT
+		//let (symbols_all_levels, indices_all_levels) = block.sampling_to_decode(*s);
+		//decoding_results.push(decoder.run_tree_decoder(symbols_all_levels, indices_all_levels));
+	//}
+	//decoding_results
+//}
 
 fn main() {
 	//Here we test our coded Merkle tree (CMT) codes using parmeters from reference designs
@@ -139,6 +143,7 @@ fn main() {
 			bits: 5.into(),
 			nonce: 6u32,
 			coded_merkle_roots_hashes: vec![H256::default(); 8],
+            delimitor: vec![],
 		};
 
 	let header_1 = header.clone(); //header for first test
@@ -152,51 +157,75 @@ fn main() {
 	let transactions: Vec<Transaction> = vec![t.into();num_transactions as usize];
     
     // number of systematic symbols for the codes on the four layers of CMT
-    let k_set: Vec<u64> = vec![512, 256, 128, 64];
+    let k_set: Vec<u64> = vec![128, 64, 32,16, 8, 4];
     let (codes_for_encoding, codes_for_decoding) = read_codes(k_set);
+    println!("codes_for_encoding {} Base symbol len {}", codes_for_encoding.len(), codes_for_encoding[0].symbols.len());
 
-    //Start tests
+    //Start testa
+    let file = File::create("time.txt").expect("unable to write file");
+    let mut writer = BufWriter::new(file);
+
+    for _ in 0..5 {
+        let start = SystemTime::now(); 
+        let (block, trans_len) = Block::new(
+            header_1.clone(), 
+            &transactions, 
+            BLOCK_SIZE as usize, 
+            HEADER_SIZE, 
+            &codes_for_encoding, 
+            vec![true; codes_for_encoding.len()]
+        );
+        let duration = start.elapsed().unwrap();
+        write!(writer, "{:?}", duration);
+    }
+
+    //let mut decoder: TreeDecoder = TreeDecoder::new(codes_for_decoding.to_vec(), &block.block_header.coded_merkle_roots_hashes);
+
+}
+
+
 
     //Test 1: Nornal mode, no coding error
     //block encoding
-    let block: Block = Block::new(header_1, &transactions, BLOCK_SIZE as usize, HEADER_SIZE, &codes_for_encoding, vec![true; codes_for_encoding.len()]);
+    //let start = SystemTime::now();
+    //let block: Block = Block::new(header_1, &transactions, BLOCK_SIZE as usize, HEADER_SIZE, &codes_for_encoding, vec![true; codes_for_encoding.len()]);
+    //println!("block constructiontime {:?}", start.elapsed());
     
     //block decoding
-    let num_samples = vec![1500, 1600, 1700, 1800, 1900, 2000];
-    let mut successful_decoding_probability: Vec<f32> = vec![0.0;num_samples.len()];
-    for i in 0..NUMBER_ITERATION { //try over NUMBER_ITERATION times, each time randomly takes num_samples symbols
-    	let decoding_results: Vec<Result<(), IncorrectCodingProof>> = test(&block, &num_samples, &codes_for_decoding); 
-    	for j in 0..num_samples.len() {
-    		match &decoding_results[j] {
-    			Ok(()) => {
-    				successful_decoding_probability[j] += 1.0/(NUMBER_ITERATION as f32);
-    			},
-    			Err(proof) => {},
-    		}
-    	}
-    }
-    for j in 0..num_samples.len() {
-    	println!("The probability of successful decoding with {} randomly sampled symbols is {}.", num_samples[j], successful_decoding_probability[j]);
-    } 
+    //let num_samples = vec![1500, 1600, 1700, 1800, 1900, 2000];
+    //let mut successful_decoding_probability: Vec<f32> = vec![0.0;num_samples.len()];
+    //for i in 0..NUMBER_ITERATION { try over NUMBER_ITERATION times, each time randomly takes num_samples symbols
+        //let decoding_results: Vec<Result<(), IncorrectCodingProof>> = test(&block, &num_samples, &codes_for_decoding); 
+        //for j in 0..num_samples.len() {
+            //match &decoding_results[j] {
+                //Ok(()) => {
+                    //successful_decoding_probability[j] += 1.0/(NUMBER_ITERATION as f32);
+                //},
+                //Err(proof) => {},
+            //}
+        //}
+    //}
+    //for j in 0..num_samples.len() {
+        //println!("The probability of successful decoding with {} randomly sampled symbols is {}.", num_samples[j], successful_decoding_probability[j]);
+    //} 
     
 
     
     //Test 2: With incorrect coding
 
     //specify error pattern
-    let mut error_pattern = vec![true; codes_for_encoding.len()];
-    error_pattern[0] = false;
+    //let mut error_pattern = vec![true; codes_for_encoding.len()];
+    //error_pattern[0] = false;
     //error_pattern[1] = false;
     
     //block encoding with the bits of first parity symbol flipped 
-	let block: Block = Block::new(header_2, &transactions, BLOCK_SIZE as usize, HEADER_SIZE, &codes_for_encoding, error_pattern);
+    //let block: Block = Block::new(header_2, &transactions, BLOCK_SIZE as usize, HEADER_SIZE, &codes_for_encoding, error_pattern);
     
     //block decoding
-	let num_samples = vec![2048];
-	for i in 0..10 { //run for 10 times, each time the error should be caught
-        let decoding_results: Vec<Result<(), IncorrectCodingProof>> = test(&block, &num_samples, &codes_for_decoding);
-    } 
-}
+    //let num_samples = vec![2048];
+    //for i in 0..10 { run for 10 times, each time the error should be caught
+        //let decoding_results: Vec<Result<(), IncorrectCodingProof>> = test(&block, &num_samples, &codes_for_decoding);
+    //} 
 
 
 

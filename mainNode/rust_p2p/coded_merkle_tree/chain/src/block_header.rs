@@ -20,6 +20,7 @@ pub struct BlockHeader {
 	pub bits: Compact,
 	pub nonce: u32,
 	pub coded_merkle_roots_hashes: Vec<H256>,//hashes of the symbols on the top layer of coded Merkle tree
+    pub delimitor: Vec<u32>, // number of bytes in transactions 
 }
 
 impl BlockHeader {
@@ -239,7 +240,8 @@ impl fmt::Debug for BlockHeader {
 			.field("time", &self.time)
 			.field("bits", &self.bits)
 			.field("nonce", &self.nonce)
-			//.field("coded_merkle_roots_hashes", &self.coded_merkle_roots_hashes.reversed())
+			.field("coded_merkle_roots_hashes", &self.coded_merkle_roots_hashes.len())
+            .field("delimitor", &self.delimitor)
 			.finish()
 	}
 }
@@ -271,6 +273,7 @@ mod tests {
 			bits: 5.into(),
 			nonce: 6,
 			coded_merkle_roots_hashes: vec![H256::default(); 8],
+            len: 0,
 		};
 
 		let mut stream = Stream::default();
@@ -327,6 +330,7 @@ mod tests {
 			bits: 5.into(),
 			nonce: 6,
 			coded_merkle_roots_hashes: vec![H256::default(); 8],
+            len: 0,
 		};
 
 		assert_eq!(expected, reader.read().unwrap());

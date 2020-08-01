@@ -32,7 +32,6 @@ pub fn convert_parity_to_symbol(parities: Vec<Vec<u64>>, n: u64) -> Vec<Vec<u64>
 	let mut codes_for_decoding: Vec<Code> = vec![];
 	for i in k_set.iter() {
 		let (code_e, code_d) = read_code_from_file(*i);
-        info!("read_code_from_file {}", i);
 		codes_for_encoding.push(code_e);
 		codes_for_decoding.push(code_d);
 	}
@@ -70,20 +69,7 @@ pub fn read_code_from_file(k: u64) -> (Code, Code) {
         let parity: Vec<u64> = line.split_whitespace().map(|s| s.parse().unwrap()).collect();
         parities_decoding.push(parity);
     }
-
-    // Read the file line by line. Each line represent a parity equation.
-    // for (index, line) in reader.lines().enumerate() {
-    //     let line = line.unwrap(); // Ignore errors.
-    //     let parity: Vec<u64> = line.split_whitespace().map(|s| s.parse().unwrap()).collect();
-    //     if index < ((n - k) as usize) {
-    //     	parities_encoding.push(parity.clone());
-    //     	parities_decoding.push(parity);
-    //     }
-    //     else {//extra parity equations to help decoding
-    //     	parities_decoding.push(parity); 
-    //     }
-    // }
-     
+    
     //Generate one code for encoding, and one code for decoding
     (Code {parities: parities_encoding.clone(), symbols: convert_parity_to_symbol(parities_encoding, n)}, 
     	Code {parities: parities_decoding.clone(), symbols: convert_parity_to_symbol(parities_decoding, n)})

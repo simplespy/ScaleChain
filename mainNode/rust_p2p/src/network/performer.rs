@@ -1,18 +1,21 @@
 use std::sync::mpsc::{self};
-use super::message::{Message, TaskRequest, PeerHandle, ChunkReply, ServerSignal};
 use std::io::{self};
 use std::thread;
-use super::blockDb::{BlockDb};
-use super::blockchain::blockchain::{BlockChain};
-use super::mempool::mempool::{Mempool};
-use super::scheduler::{Scheduler, Token};
+use std::sync::{Arc, Mutex};
+
+use crate::db::blockDb::{BlockDb};
+use crate::blockchain::blockchain::{BlockChain};
+use crate::mempool::mempool::{Mempool};
+use crate::mempool::scheduler;
+
+use super::message::{Message, TaskRequest, PeerHandle, Samples, ServerSignal};
 use super::contract::contract::{Contract};
 use super::contract::interface::Message as ContractMessage;
 use super::contract::interface::Response as ContractResponse;
 use super::contract::interface::{Handle, Answer};
 use super::contract::interface::Error as ContractError;
 use super::primitive::block::ContractState;
-use std::sync::{Arc, Mutex};
+
 use crossbeam::channel::{self, Sender, Receiver};
 use std::net::{SocketAddr};
 use super::primitive::hash::{H256};
@@ -32,59 +35,61 @@ use mio_extras::channel::Sender as MioSender;
 use super::cmtda::{BlockHeader};
 use hex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use chain::constants::{BLOCK_SIZE, BASE_SYMBOL_SIZE, RATE, UNDECODABLE_RATIO};
 
 pub struct Performer {
     task_source: Receiver<TaskRequest>,
     chain: Arc<Mutex<BlockChain>>, 
     block_db: Arc<Mutex<BlockDb>>,
     mempool: Arc<Mutex<Mempool>>,
-    scheduler_handler: Sender<Option<Token>>,
+    scheduler_handler: Sender<scheduler::Signal>,
     contract_handler: Sender<Handle>,
     addr: SocketAddr,
-    proposer_by_addr: HashMap<SocketAddr, Sender<ChunkReply> >,
+    proposer_by_addr: HashMap<SocketAddr, Sender<Samples> >,
     key_file: String,
     scale_id: usize,
     agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
     threshold: usize,
     server_control_sender: MioSender<ServerSignal>,
-    manager_source: Sender<(usize, Option<ChunkReply>)>,
-    //curr_proposer: Option<Sender<String>>,
+    manager_source: Sender<(usize, Option<Samples>)>,
+    num_nodes: u64,
+}
+
+pub fn new(
+    task_source: Receiver<TaskRequest>, 
+    blockchain: Arc<Mutex<BlockChain>>,
+    block_db: Arc<Mutex<BlockDb>>,
+    mempool: Arc<Mutex<Mempool>>,
+    scheduler_handler: Sender<scheduler::Signal>,
+    contract_handler: Sender<Handle>,
+    addr: SocketAddr,
+    key_file: String,
+    scale_id: usize,
+    threshold: usize,
+    server_control_sender: MioSender<ServerSignal>,
+    manager_source: Sender<(usize, Option<Samples>)>,
+    num_nodes: u64,
+) -> Performer {
+    Performer {
+        task_source,
+        chain: blockchain,
+        block_db: block_db,
+        mempool: mempool,
+        contract_handler: contract_handler,
+        scheduler_handler: scheduler_handler,
+        addr: addr,
+        proposer_by_addr: HashMap::new(),
+        key_file,
+        scale_id,
+        agg_sig: Arc::new(Mutex::new(HashMap::new())),
+        threshold,
+        server_control_sender: server_control_sender,
+        manager_source: manager_source,
+        num_nodes: num_nodes,
+    } 
 }
 
 impl Performer {
-    pub fn new(
-        task_source: Receiver<TaskRequest>, 
-        blockchain: Arc<Mutex<BlockChain>>,
-        block_db: Arc<Mutex<BlockDb>>,
-        mempool: Arc<Mutex<Mempool>>,
-        scheduler_handler: Sender<Option<Token>>,
-        contract_handler: Sender<Handle>,
-        addr: SocketAddr,
-        key_file: String,
-        scale_id: usize,
-        threshold: usize,
-        server_control_sender: MioSender<ServerSignal>,
-        manager_source: Sender<(usize, Option<ChunkReply>)>,
-    ) -> Performer {
-        Performer {
-            task_source,
-            chain: blockchain,
-            block_db: block_db,
-            mempool: mempool,
-            contract_handler: contract_handler,
-            scheduler_handler: scheduler_handler,
-            addr: addr,
-            proposer_by_addr: HashMap::new(),
-            key_file,
-            scale_id,
-            agg_sig: Arc::new(Mutex::new(HashMap::new())),
-            threshold,
-            server_control_sender: server_control_sender,
-            manager_source: manager_source,
-            //curr_proposer: None,
-        } 
-    }
-
     pub fn start(mut self) -> io::Result<()> {
         let handler = thread::spawn(move || {
             self.perform(); 
@@ -183,7 +188,6 @@ impl Performer {
             }
         };
 
-        
         // 1. compute curr_hash locally using all prev blocks stored in block_db
         if local_state.block_id+1 == peer_state.block_id {
             let local_comp_hash = self.compute_local_curr_hash(
@@ -262,12 +266,12 @@ impl Performer {
                 },
                 Message::PassToken(token) => {
                     info!("{:?} receive token", self.addr);
-                    self.scheduler_handler.send(Some(token));
+                    self.scheduler_handler.send(scheduler::Signal::Data(token));
                 },
                 Message::ProposeBlock((header, block_id)) => {
                     if self.scale_id > 0 {
                         let hash_str = utils::hash_header_hex(&header);
-                        info!("{:?} receive ProposeBlock: header hash: {:?}", self.addr, hash_str);
+                        //info!("{:?} receive ProposeBlock: header hash: {:?}", self.addr, hash_str);
                         let local_addr = self.addr.clone();
                         
                         let proposer_addr = peer_handle.addr;
@@ -276,7 +280,12 @@ impl Performer {
                         self.proposer_by_addr.insert(proposer_addr, tx);
                         // this scalenode receive propose block
                         let response_msg = Message::ScaleReqChunks;
-                        let samples_idx: Vec<u32> = vec![0; 35];
+
+                        let header_cmt: BlockHeader = deserialize(&header.clone() as &[u8]).unwrap();
+                        // hard coded
+                        let num_symbol = BLOCK_SIZE/(BASE_SYMBOL_SIZE as u64) *((1.0/RATE) as u64);
+                        let samples_idx = get_sample_index(self.scale_id, num_symbol as usize, self.num_nodes); //self.scale_id 
+
                         let response_msg = Message::ScaleReqChunks(samples_idx);
                         peer_handle.write(response_msg);
 
@@ -285,48 +294,43 @@ impl Performer {
                         let local_aggsig = self.agg_sig.clone();
                         let broadcaster = self.server_control_sender.clone();
                         let db = self.block_db.clone();
-                        let threshold = self.threshold;
+
                         let contract_handler = self.contract_handler.clone();
+                        let num_nodes = self.num_nodes;
                         
                         // timed loop
                         thread::spawn(move || {
                             let mut num_chunk = 0;
-                            let chunk_thresh = 0; // number of chunk required to vote yes
+                            let chunk_thresh = (((BLOCK_SIZE/BASE_SYMBOL_SIZE as u64) as f32 )/RATE*UNDECODABLE_RATIO) as u64 / num_nodes; 
+
                             let mut chunk_complete = false;
-                            
 
                             loop {
                                 match rx.recv() {
                                     Ok(chunk_reply) => {
                                         let mut local_db = db.lock().unwrap();
-                                        let header_cmt: BlockHeader = deserialize(&header.clone() as &[u8]).unwrap();
                                         // compute id
                                         local_db.insert_cmt_sample(block_id, &chunk_reply);
-                                        num_chunk += chunk_reply.symbols.len();
+                                        let num =  get_num_base_symbols(&chunk_reply.idx);
+                                        num_chunk += num;
                                     },
                                     Err(e) => info!("proposer error"),
                                 }
-
+                                info!("number stored chunks {} thresh {}", num_chunk, chunk_thresh);
                                 if num_chunk > chunk_thresh {
-                                    
                                     // vote
                                     let header_str: String = hex::encode(&header);
-                                    //utils::_generate_random_header();
-                                  //  let header_str = "deadbeef".to_string();
                                     
                                     let (sigx, sigy) = utils::_sign_bls(header_str.clone(), keyfile);
                                     let sid = 0;
                                     let response_msg = Message::MySign(header_str.clone(), sid, block_id, sigx.clone(), sigy.clone(), scaleid);
-                                    info!("{:?} broadcase my sign", local_addr);
                                     let signal = ServerSignal::ServerBroadcast(response_msg);
-                                    broadcaster.send(signal);
+                                    
                                     
                                     let mut aggsig = local_aggsig.lock().unwrap();
                                     if aggsig.get(&header_str).is_none() {
                                         aggsig.insert(header_str.clone(),  (sigx.clone(), sigy.clone(), (1 << scaleid)));
-                                        //info!("{:?} aggregate sign, bitset {}", local_addr, (1 << scaleid));
-                                    }
-                                    else {
+                                    } else {
                                         let ( x, y, bitset) = aggsig.get(&header_str).unwrap();
                                         let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx, sigy);
                                         let bitset = bitset + (1 << scaleid);
@@ -334,6 +338,7 @@ impl Performer {
                                             header_str.clone(),  
                                             (sigx.clone(), sigy.clone(), bitset.clone()));
                                     }
+                                    broadcaster.send(signal);
                                     break;
                                 }
                             }
@@ -350,7 +355,7 @@ impl Performer {
                     // new
                     let decode_header = hex::decode(&header).unwrap();
                     let header_hash_str = utils::hash_header_hex(&decode_header);
-                    info!("{:?} receive Mysign header hash: {:?}", self.addr, header_hash_str);
+                    //info!("{:?} receive Mysign header hash: {:?}, header size {}", self.addr, header_hash_str, header.len());
                     let mut sigx = sigx;
                     let mut sigy = sigy;
                     //info!("{:?} receive MySign message from node {:?}.", self.addr, scale_id);
@@ -358,24 +363,24 @@ impl Performer {
 
                     let local_aggsig = self.agg_sig.clone();
                     let mut aggsig = local_aggsig.lock().unwrap();
+                    let threshold = (UNDECODABLE_RATIO*(self.num_nodes as f32)).ceil() as usize ;
+                    info!("num node {}", self.num_nodes);
 
                     if aggsig.get(&header).is_none() {
                         //info!("{:?} Mysign first seen header", self.addr);
                         aggsig.insert(header.clone(),  (sigx, sigy, (1 << scale_id)));
-                    }
-                    else {
-                        //changed
+                    } else {
                         let ( x, y, mut bitset) = aggsig.get(&header).unwrap().clone();
                         if (1 << scale_id) & bitset.clone() == 0 {
-                            //info!("old bitste {}", bitset);
+                            info!("Mysign {:?} old bitste {}", self.addr, bitset);
                             let (sigx_t, sigy_t) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx.clone(), sigy.clone());
                             sigx = sigx_t;
                             sigy = sigy_t;
                             bitset = bitset + (1 << scale_id);
                             aggsig.insert(header.clone(), (sigx.clone(), sigy.clone(), bitset.clone()));
                         }
-                        //info!("{:?} MySign number bit set {}, thresh {}", self.addr, utils::_count_sig(bitset.clone()), self.threshold);
-                        if utils::_count_sig(bitset.clone()) >= self.threshold {
+                        info!("signature num {} thresh {}", utils::_count_sig(bitset.clone()) , threshold);
+                        if utils::_count_sig(bitset.clone()) >= threshold {
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
                                 message: ContractMessage::SubmitVote(header, U256::from(sid), U256::from(bid), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
@@ -390,16 +395,15 @@ impl Performer {
                 },
                 Message::ScaleReqChunks(samples_idx) => {
                     let sample_len = samples_idx.len();
-
                     // this client needs to prepare chunks in response to 
                     let mut mempool = self.mempool.lock().expect("lock mempool");
                     let (header, symbols, idx) = mempool.sample_cmt(samples_idx);
                     let header_bytes = serialize(&header);
 
                     let hash_str = utils::hash_header_hex(&header_bytes);
-                    info!("{:?} recv {:?} ScaleReqChunks, header hash: {:?} ", self.addr, sample_len, hash_str);
+                    //info!("{:?} recv {:?} ScaleReqChunks, header hash: {:?} ", self.addr, sample_len, hash_str);
                     // this sends chunk to the scale node
-                    let chunks = ChunkReply {
+                    let chunks = Samples {
                         header: header_bytes.into(),
                         symbols: symbols,
                         idx: idx,
@@ -412,7 +416,7 @@ impl Performer {
                 Message::ScaleReqChunksReply(chunks) => {
                     if self.scale_id > 0 {
                         let proposer_socket = peer_handle.addr ;
-                        info!("{:?} receive ScaleReqChunksReply from {:?}", self.addr, proposer_socket);
+                        //info!("{:?} receive ScaleReqChunksReply from {:?}", self.addr, proposer_socket);
                         match &self.proposer_by_addr.get(&proposer_socket) {
                             Some(sender) => {
                                 sender.send(chunks);
@@ -424,7 +428,7 @@ impl Performer {
                 },
                 Message::ScaleGetAllChunks(state) => {
                     if self.scale_id > 0 {
-                        info!("{:?} receive ScaleGetAllChunks {:?}", self.addr, state);
+                        //info!("{:?} receive ScaleGetAllChunks {:?}", self.addr, state);
                         let local_db = self.block_db.lock().unwrap();
                         let chunk = local_db.get_chunk(state.block_id);
                         drop(local_db);
@@ -436,7 +440,7 @@ impl Performer {
                     }
                 },
                 Message::ScaleGetAllChunksReply((chunk, block_id)) => {
-                    info!("{:?} recv ScaleGetAllChunksReply", self.addr);
+                    //info!("{:?} recv ScaleGetAllChunksReply", self.addr);
                     self.manager_source.send((block_id, chunk));
                 },
             }
@@ -444,3 +448,23 @@ impl Performer {
     }
 }
 
+// scale id starts at 1
+pub fn get_sample_index(scale_id: usize, num_trans: usize, num_node: u64) -> Vec<u32> {
+    let num_sample = ((num_trans as f32) / (num_node as f32)).ceil() as usize;
+    let mut sample_idx = vec![];
+    let start = (scale_id-1)*num_sample;
+    let stop = if scale_id*num_sample > num_trans {
+        num_trans
+    } else {
+        scale_id*num_sample
+    };
+    for i in start..stop {
+        sample_idx.push(i as u32);
+    }
+    sample_idx
+}
+
+pub fn get_num_base_symbols(idx: &Vec<Vec<u64>>) -> u64 {
+    assert!(idx.len() > 0);
+    idx[0].len() as u64
+}

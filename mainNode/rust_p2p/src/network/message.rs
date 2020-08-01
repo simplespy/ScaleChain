@@ -14,10 +14,33 @@ use chain::big_array::{BigArray};
 use super::primitive::block::ContractState;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ChunkReply {
+pub struct Samples {
     pub header: Vec<u8>,
     pub symbols: Vec<Vec<Symbol>>,
     pub idx: Vec<Vec<u64>>,
+}
+
+impl Samples {
+    pub fn merge(&mut self, samples: &Samples) -> bool {
+        if self.header != samples.header {
+            return false;
+        }
+
+        // has the same number of layers
+        let num_layer = self.symbols.len();
+        if (samples.symbols.len() != num_layer) || 
+           (samples.idx.len() != num_layer) {
+            return false;
+        }
+
+        // TODO check if they are redundant 
+       
+        // merge
+        for i in 0..num_layer {
+
+        }
+        return true;
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -29,10 +52,10 @@ pub enum Message {
     PassToken(Token),
     ProposeBlock((Vec<u8>, usize)), //BlockHeader block_id //sender is client
     ScaleReqChunks(Vec<u32>), //(id), // sender is scalenode
-    ScaleReqChunksReply(ChunkReply),
+    ScaleReqChunksReply(Samples),
     MySign(String, usize, usize, String, String, usize),
     ScaleGetAllChunks(ContractState), // blockheader
-    ScaleGetAllChunksReply((Option<ChunkReply>, usize)),
+    ScaleGetAllChunksReply((Option<Samples>, usize)),
 }
 
 

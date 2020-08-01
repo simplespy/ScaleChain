@@ -52,8 +52,9 @@ impl IndexedBlock {
 	}
 
 	pub fn to_raw_block(self) -> Block {
-		Block::new(self.header.raw, &self.transactions.into_iter().map(|tx| tx.raw).collect(), 
-			BLOCK_SIZE as usize, HEADER_SIZE, &vec![], vec![])
+		let (b, _) = Block::new(self.header.raw, &self.transactions.into_iter().map(|tx| tx.raw).collect(), 
+			BLOCK_SIZE as usize, HEADER_SIZE, &vec![], vec![]);
+        b
 	}
 
 	pub fn size(&self) -> usize {
