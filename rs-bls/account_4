@@ -1,0 +1,7 @@
+{
+	"rpc_url": "https://ropsten.infura.io/v3/fd7fd90847cd4ca99ce886d4bffdccf8",
+	"contract_address": "0x309B64d4FAF333944ca34DcD62D2A89e0B6278CB",
+	"address": "0xf93e9e0b1aDa18e34BDf9C2dd5A8912610d87A03",
+    "private_key": "0xf8df21c3cbf5bcdf0413c69d804f4b9433d189d52fe3a7b7d8a2465f517d5a5e",
+    "ip_address": "127.0.0.1:40004"
+}

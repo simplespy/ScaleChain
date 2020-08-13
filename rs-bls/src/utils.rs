@@ -12,7 +12,32 @@ use std::io::Write;
 pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U256, y1: U256, y2: U256) -> Vec<u8> {
     let addr = hex::encode(address.as_bytes());
     //let addr = addr.replace("0x", "");
-    let command = format!("ethabi encode function --lenient ./abi3.json addScaleNode -p {} -p {} -p {} -p {} -p {} -p {}", addr, ip_addr, x1, x2, y1, y2);
+    let command = format!("ethabi encode function --lenient ./abi.json addScaleNode -p {} -p {} -p {} -p {} -p {} -p {}", addr, ip_addr, x1, x2, y1, y2);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+    println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
+pub fn _encode_addSideNode(sid: U256, address: Address, ip_addr: String) -> Vec<u8> {
+    let addr = hex::encode(address.as_bytes());
+    //let addr = addr.replace("0x", "");
+    let command = format!("ethabi encode function --lenient ./abi.json addSideNode -p {} -p {} -p {}", sid, addr, ip_addr);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+    println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
+pub fn _encode_deleteSideNode(sid: U256, tid: U256) -> Vec<u8> {
+    //let addr = addr.replace("0x", "");
+    let command = format!("ethabi encode function --lenient ./abi.json deleteSideNode -p {} -p {}", sid, tid);
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -44,7 +69,7 @@ pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> 
     return function_abi;
 }
 pub fn _encode_sort(s: U256) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json sort -p {}", s);
+    let command = format!("ethabi encode function --lenient ./abi_sorter.json sort -p {}", s);
    // println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)

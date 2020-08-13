@@ -101,6 +101,56 @@ impl Contract {
         }
     }
 
+    pub fn add_side_node(&self, sid: U256, address: Address, ip_addr: String) {
+        let nonce = self._transaction_count();
+        let function_abi = _encode_addSideNode(sid, address, ip_addr);
+        let gas = self._estimate_gas(function_abi.clone());
+
+        println!("{:?}", gas);
+
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: _convert_u256(gas),
+            data: function_abi
+        };
+
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+        let tx_hash = self._send_transaction(signed_tx);
+        println!("{:?}", tx_hash);
+        if self.get_tx_receipt(tx_hash) {
+            println!("{:?}", tx_hash);
+        }
+    }
+
+    pub fn delete_side_node(&self, sid: U256, tid: U256) {
+        let nonce = self._transaction_count();
+        let function_abi = _encode_deleteSideNode(sid, tid);
+        //let gas = self._estimate_gas(function_abi.clone());
+
+        //println!("{:?}", gas);
+
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: ethereum_types::U256::from(750000),
+            data: function_abi
+        };
+
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+        let tx_hash = self._send_transaction(signed_tx);
+        println!("{:?}", tx_hash);
+        if self.get_tx_receipt(tx_hash) {
+            println!("{:?}", tx_hash);
+        }
+    }
+
 
 
 
@@ -142,6 +192,12 @@ impl Contract {
             .wait()
             .unwrap()
     }
+    fn _get_side_node_id(&self, sid: usize, addr: Address) -> U256 {
+        self.contract
+            .query("getSideNodeID", (web3::types::U256::from(sid), addr), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+    }
     pub fn _get_scale_id(&self, addr: Address) -> U256 {
         self.contract
             .query("getScaleID", (addr), None, EthOption::default(), None)
@@ -162,13 +218,13 @@ impl Contract {
         let nonce = self._transaction_count();
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let function_abi = _encode_submitVote(str_block, sid, bid, sigx, sigy, bitset);
-        let gas = self._estimate_gas(function_abi.clone());
-        println!("{:?}", gas);
+        //let gas = self._estimate_gas(function_abi.clone());
+        //println!("{:?}", gas);
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*200,
            //gas: _convert_u256(gas),
             gas: ethereum_types::U256::from(750000),
             data: function_abi
@@ -236,13 +292,13 @@ impl Contract {
         let function_abi = _encode_sort(U256::from(s));
         let gas = self._estimate_gas(function_abi.clone());
 
-         //println!("{:?}", gas);
+         println!("{:?}", gas);
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*150,
             gas: _convert_u256(gas),
             data: function_abi
         };
@@ -290,16 +346,17 @@ impl Contract {
     }
     fn reset_chain(&self, sid: usize)  {
         let nonce = self._transaction_count();
+
         let function_abi = _encode_resetSideChain(U256::from(sid));
         let gas = self._estimate_gas(function_abi.clone());
 
-        //println!("{:?}", gas);
+        println!("{:?}", nonce);
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
             to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000),
+            gas_price: ethereum_types::U256::from(1000000000)*300,
             gas: _convert_u256(gas),
             data: function_abi
         };
@@ -339,13 +396,13 @@ pub fn _count_sig(x: usize) -> usize {
     cnt
 }
 fn main() {
-    //let file = File::open("account_test").unwrap();
-   // let account: Account = serde_json::from_reader(file).expect("deser account");
-   // let contract = Contract::new(account.clone());
-    //for i in {0..100} {
-      //  contract.sort(3);
-    //}
-
+/*    let file = File::open("account_test").unwrap();
+    let account: Account = serde_json::from_reader(file).expect("deser account");
+    let contract = Contract::new(account.clone());
+    for i in {0..100} {
+        contract.sort(3);
+    }
+*/
 
 
        let file_admin = File::open("account_admin").unwrap();
@@ -370,35 +427,82 @@ fn main() {
        let bls_key_2 = BLSKey::new(bls_key_str_2);
 
 
-       let contract = Contract::new(account_admin.clone());
+        let contract = Contract::new(account_1.clone());
+
+
+       // contract.add_side_node(U256::from(0), account_admin.address, account_admin.ip_address);
+  //  contract.add_side_node(U256::from(0), account_1.address, account_1.ip_address);
+   // contract.add_side_node(U256::from(0), account_2.address, account_2.ip_address);
+        contract.delete_side_node(U256::from(0), U256::from(0));
+        let bid = contract._get_side_node_id(0, account_2.address);
+        println!("side node id = {}",bid);
+
+/*
+    for i in {3..7} {
+        let file = File::open(format!("account_{}", i)).unwrap();
+        let key = File::open(format!("keyfile/node{}", i)).unwrap();
+        let account: Account = serde_json::from_reader(file).expect("deser account");
+        let bls_key_str: BLSKeyStr = serde_json::from_reader(key).expect("deser key file");
+        let bls_key = BLSKey::new(bls_key_str);
+        contract.add_scale_node(account.address, account.ip_address, bls_key.pkx1, bls_key.pkx2, bls_key.pky1, bls_key.pky2);
+        let cnt = contract._count_scale_nodes();
+        println!("nodes num = {}",cnt);
+
+    }
+
+    let mut xx = 4;
+    for i in {3..7} {
+        let file = File::open(format!("account_{}", i)).unwrap();
+        let key = File::open(format!("keyfile/node{}", i)).unwrap();
+        let account: Account = serde_json::from_reader(file).expect("deser account");
+        let bls_key_str: BLSKeyStr = serde_json::from_reader(key).expect("deser key file");
+        let bls_key = BLSKey::new(bls_key_str);
+        let contract = Contract::new(account.clone());
+        let (sigx1, sigy1) = _sign_bls("deadbeef".to_string(), "key_1".to_string());
+        let (sigx2, sigy2) = _sign_bls("deadbeef".to_string(), format!("node{}", i));
+        let (sigx, sigy) = _aggregate_sig(sigx1, sigy1, sigx2, sigy2);
+        xx *= 2;
+        let bid = contract._get_blk_id(0);
+        contract.submit_vote("deadbeef".to_string(), U256::from(0), U256::from(bid + 1), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(2+xx));
+
+        let bid = contract._get_blk_id(0);
+        println!("block id = {}",bid);
+    }
+*/
+    /*  for i in {0..3} {
+         let addr = contract._get_scale_node(i);
+         let pub_key = contract._get_scale_pub_key(addr);
+         println!("{:?},{:?}", addr, pub_key);
+     }*/
+
+
      //  contract.send_block(_generate_random_header());
 
-  //     contract.add_scale_node(account_1.address, account_1.ip_address, bls_key_1.pkx1, bls_key_1.pkx2, bls_key_1.pky1, bls_key_1.pky2);
-   //    contract.add_scale_node(account_2.address, account_2.ip_address, bls_key_2.pkx1, bls_key_2.pkx2, bls_key_2.pky1, bls_key_2.pky2);
+   //    contract.add_scale_node(account_1.address, account_1.ip_address, bls_key_1.pkx1, bls_key_1.pkx2, bls_key_1.pky1, bls_key_1.pky2);
+    //   contract.add_scale_node(account_2.address, account_2.ip_address, bls_key_2.pkx1, bls_key_2.pkx2, bls_key_2.pky1, bls_key_2.pky2);
 
     //   let pub_key = contract._get_scale_pub_key(account_2.address);
     //   println!("pub_key of account2 is {:?}", pub_key);
-       let cnt = contract._count_scale_nodes();
-       println!("nodes num = {}",cnt);
 
-       let bid = contract._get_blk_id(0);
-       println!("block id = {}",bid);
+    /*
+           let bid = contract._get_blk_id(0);
+           println!("block id = {}",bid);
 
-    //   contract.send_block("deadbeef".to_string());
+        //   contract.send_block("deadbeef".to_string());
 
-       let (sigx1, sigy1) = _sign_bls("deadbeef".to_string(), "key_1".to_string());
-       let (sigx2, sigy2) = _sign_bls("deadbeef".to_string(), "key_2".to_string());
-       let (sigx, sigy) = _aggregate_sig(sigx1, sigy1, sigx2, sigy2);
+           let (sigx1, sigy1) = _sign_bls("deadbeef".to_string(), "key_1".to_string());
+           let (sigx2, sigy2) = _sign_bls("deadbeef".to_string(), "key_2".to_string());
+           let (sigx, sigy) = _aggregate_sig(sigx1, sigy1, sigx2, sigy2);
 
-    //   println!("signature = {:?}, {:?}", sigx, sigy);
-       contract.submit_vote("deadbeef".to_string(), U256::from(0), U256::from(bid + 1), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(6));
-      //  contract.reset_chain(0);
-       let bid = contract._get_blk_id(0);
+        //   println!("signature = {:?}, {:?}", sigx, sigy);
+           contract.submit_vote("deadbeef".to_string(), U256::from(0), U256::from(bid + 1), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(6));
+        //    contract.reset_chain(0);
+           let bid = contract._get_blk_id(0);
 
-       println!("{:?}", contract._get_curr_hash(0));
-       println!("block id = {}", bid);
+           println!("{:?}", contract._get_curr_hash(0));
+           println!("block id = {}", bid);
 
-
+    */
    // println!("{:?}", contract._get_pub_key(account_2.address));
 
   //  println!("{:?}",_count_sig(26));
@@ -412,7 +516,6 @@ fn main() {
     hasher.input(&concat_str);
     hasher.result(&mut curr_hash);
     println!("{:?}", hex::encode(curr_hash));*/
-
 
 
 

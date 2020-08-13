@@ -7,6 +7,7 @@ contract ScaleChain {
     bytes32[] public curr_hash;
     uint[] public block_id;
     uint[][] public signers; 
+    SideNode[][10] public token_rings;
 
     struct G1Point {
         uint X;
@@ -37,6 +38,11 @@ contract ScaleChain {
         uint pky1;
         uint pky2;
 
+    }
+
+    struct SideNode {
+        address eth_addr;
+        string ip_addr;
     }
     // Initialize ScaleNodes so that a sender of a new block
     // has to be one of the scaleNode
@@ -75,6 +81,50 @@ contract ScaleChain {
         curr_hash.push(0);
         uint[] memory new_signers; 
         signers.push(new_signers);
+        //SideNode[] memory new_token_ring;
+        //token_rings.push(new_token_ring);
+    }
+
+    function addSideNode(uint sid, address new_side_node, string ip_addr) public {
+        token_rings[sid].push(SideNode({
+            eth_addr: new_side_node,
+            ip_addr: ip_addr
+        }));
+        /*
+        token_ring.push(SideNode({
+            eth_addr: new_side_node,
+            ip_addr: ip_addr
+        }));
+        */
+    }
+
+    function deleteSideNode(uint sid, uint tid) public {
+        //require (token_rings[sid][tid].eth_addr == msg.sender);
+        for (uint i = tid; i < token_rings[sid].length-1; i++){
+            token_rings[sid][i] = token_rings[sid][i+1];
+        }
+        token_rings[sid].length--;
+        //require (token_ring[tid].eth_addr == msg.sender);
+        //delete token_ring[tid];
+    }
+
+    function getSideNodeID(uint sid, address node) public view returns (uint tid) {
+        tid = token_rings[sid].length;
+        for (uint i = 0; i < token_rings[sid].length; i++) {
+            if (token_rings[sid][i].eth_addr == node) {
+                tid = i;
+            }
+        }
+        require(tid < token_rings[sid].length);
+        /*tid = token_ring.length;
+        for (uint i = 0; i < token_ring.length; i++) {
+            if (token_ring[i].eth_addr == node) {
+                tid = i;
+            }
+        }
+        require(tid < token_ring.length);
+*/
+
     }
 
     // Get Ether node addresses
