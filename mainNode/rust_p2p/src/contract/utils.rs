@@ -63,6 +63,30 @@ pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U25
     return function_abi;
 }
 
+pub fn _encode_addSideNode(sid: U256, address: Address, ip_addr: String) -> Vec<u8> {
+    let addr = hex::encode(address.as_bytes());
+    //let addr = addr.replace("0x", "");
+    let command = format!("ethabi encode function --lenient ./abi.json addSideNode -p {} -p {} -p {}", sid, addr, ip_addr);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+   // println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
+pub fn _encode_deleteSideNode(sid: U256, tid: U256) -> Vec<u8> {
+    let command = format!("ethabi encode function --lenient ./abi.json deleteSideNode -p {} -p {}", sid, tid);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+   // println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
 
 pub fn _encode_submitVote(block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
     let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {} -p {} -p {}", block, sid, bid, sigx, sigy, bitset);

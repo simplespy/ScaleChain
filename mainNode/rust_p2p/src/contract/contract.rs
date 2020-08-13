@@ -221,6 +221,56 @@ impl Contract {
         }
     }
 
+    pub fn add_side_node(&self, sid: U256, address: Address, ip_addr: String) {
+        let nonce = self._transaction_count();
+        let function_abi = _encode_addSideNode(sid, address, ip_addr);
+        let gas = self._estimate_gas(function_abi.clone());
+
+        println!("{:?}", gas);
+
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: _convert_u256(gas),
+            data: function_abi
+        };
+
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+        let tx_hash = self._send_transaction(signed_tx);
+        println!("{:?}", tx_hash);
+        if self.get_tx_receipt(tx_hash) {
+            println!("{:?}", tx_hash);
+        }
+    }
+
+    pub fn delete_side_node(&self, sid: U256, tid: U256) {
+        let nonce = self._transaction_count();
+        let function_abi = _encode_deleteSideNode(sid, tid);
+        //let gas = self._estimate_gas(function_abi.clone());
+
+        //println!("{:?}", gas);
+
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: ethereum_types::U256::from(750000),
+            data: function_abi
+        };
+
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+        let tx_hash = self._send_transaction(signed_tx);
+        println!("{:?}", tx_hash);
+        if self.get_tx_receipt(tx_hash) {
+            println!("{:?}", tx_hash);
+        }
+    }
+
     pub fn submit_vote(&self, str_block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) {
         info!("{:?} submit vote", self.ip_addr);
         let nonce = self._transaction_count();
@@ -474,6 +524,13 @@ impl Contract {
     fn _get_blk_id(&self, sid: usize) -> U256 {
         self.contract
             .query("getBlockID", (web3::types::U256::from(sid),), None, EthOption::default(), None)
+            .wait()
+            .unwrap()
+    }
+
+    fn _get_side_node_id(&self, sid: usize, addr: Address) -> U256 {
+        self.contract
+            .query("getSideNodeID", (web3::types::U256::from(sid), addr), None, EthOption::default(), None)
             .wait()
             .unwrap()
     }
