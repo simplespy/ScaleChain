@@ -35,7 +35,8 @@ pub enum Message {
     SyncChain,
     EstimateGas(Block),
     SubmitVote(String, U256, U256, U256, U256, U256),
-    ResetChain(usize)
+    ResetChain(usize),
+    AddSideNode(usize),
 }
 
 pub enum Error {

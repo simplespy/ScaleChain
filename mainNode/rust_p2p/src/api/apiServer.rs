@@ -14,9 +14,10 @@ use std::net::{SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::collections::{HashMap};
 use serde::{Serialize};
-use super::network::message::{PeerHandle};
+use crate::network::message::{PeerHandle, ServerSignal};
 use super::network::message::Message as PerformerMessage;
 use super::experiment::snapshot::{PERFORMANCE_COUNTER};
+use mio_extras::channel::Sender as MioSender;
 use web3::types::U256;
 
 pub struct ApiServer {
@@ -31,6 +32,7 @@ pub struct RequestContext {
     chain: Arc<Mutex<BlockChain>>,
     block_db: Arc<Mutex<BlockDb>>,
     contract_channel: Sender<Handle>,
+    server_control: MioSender<ServerSignal>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +63,7 @@ impl ApiServer {
                  contract_channel: Sender<Handle>,
                  chain: Arc<Mutex<BlockChain>>,
                  block_db: Arc<Mutex<BlockDb>>,
+                 server_control: MioSender<ServerSignal>,
     ) {
         let server = Server::http(&socket).unwrap();
         let _handler = thread::spawn(move || {
@@ -71,6 +74,7 @@ impl ApiServer {
                     chain: chain.clone(),
                     block_db: block_db.clone(),
                     contract_channel: contract_channel.clone(),
+                    server_control: server_control.clone(),
                 };
                 // new thread per request
                 let _ = thread::spawn(move || {
@@ -79,6 +83,14 @@ impl ApiServer {
                     let url = url_base.join(url_path).expect("join url base and path");
                     
                     match url.path() {
+                        "/server/ping" => {
+                            let text = "hello Ping from ".to_owned() + &socket.ip().to_string();
+                            let signal = ServerSignal::ServerBroadcast(PerformerMessage::Ping(text));
+                            rc.server_control.send(signal);
+                            respond_result!(request, true, "ok");
+                        },
+
+
                         "/telematics/snapshot" => {
                             let snapshot = PERFORMANCE_COUNTER.snapshot();
                             let content_type = "Content-Type: application/json".parse::<Header>().unwrap();
@@ -140,11 +152,32 @@ impl ApiServer {
                             respond_result!(request, true, format!("{:?}, {}", state.block_id, state.curr_hash.to_string()));
                             //respond_result!(request, true, format!("{:?}", state));
                         },
-                        "/block-db/get-num-blocks" => {
+                        "/block-db/get-stored-blocks" => {
                             let block_db = rc.block_db.lock().expect("api gets block db");
                             let num_blocks = block_db.get_num_blocks();
                             drop(block_db);
                             respond_result!(request, true, format!("{:?}", num_blocks));
+                        },
+                        "/block-db/set-block-thresh" => {
+                            let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+                            let thresh = match pairs.get("thresh") {
+                                Some(s) => s,
+                                None => {
+                                    respond_result!(request, false, "missing size");
+                                    return;
+                                },
+                            };
+                            let thresh = match thresh.parse::<usize>() {
+                                Ok(s) => s,
+                                Err(_) => {
+                                    respond_result!(request, false, "need to be numeric");
+                                    return;
+                                },
+                            };
+                            let mut  block_db = rc.block_db.lock().expect("gets block db");
+                            block_db.thresh = thresh;
+                            drop(block_db);
+                            respond_result!(request, true, "ok");
                         },
                         "/mempool/change-size" => {
                             let mut pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
@@ -346,19 +379,19 @@ impl ApiServer {
                         },
                         "/contract/submit-vote" => {
 
-                            let (answer_tx, answer_rx) = channel::bounded(1);
-                            let header = super::contract::utils::_generate_random_header();
-                            let (sigx, sigy) = super::contract::utils::_sign_bls(header.clone(), "node1".to_string());
-                            let (sigx2, sigy2) = super::contract::utils::_sign_bls(header.clone(), "node2".to_string());
-                            let (sigx3, sigy3) = super::contract::utils::_sign_bls(header.clone(), "node3".to_string());
-                            let (sigx, sigy) = super::contract::utils::_aggregate_sig(sigx, sigy, sigx2, sigy2);
-                            let (sigx, sigy) = super::contract::utils::_aggregate_sig(sigx, sigy, sigx3, sigy3);
-                            //  self.submit_vote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26))
-                            let handle = Handle {
-                                message: Message::SubmitVote("deadbeef".to_string(), U256::from(0), U256::from(5), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26)),
-                                answer_channel: Some(answer_tx),
-                            };
-                            rc.contract_channel.send(handle);
+                            //let (answer_tx, answer_rx) = channel::bounded(1);
+                            //let header = super::contract::utils::_generate_random_header();
+                            //let (sigx, sigy) = super::contract::utils::_sign_bls(header.clone(), "node1".to_string());
+                            //let (sigx2, sigy2) = super::contract::utils::_sign_bls(header.clone(), "node2".to_string());
+                            //let (sigx3, sigy3) = super::contract::utils::_sign_bls(header.clone(), "node3".to_string());
+                            //let (sigx, sigy) = super::contract::utils::_aggregate_sig(sigx, sigy, sigx2, sigy2);
+                            //let (sigx, sigy) = super::contract::utils::_aggregate_sig(sigx, sigy, sigx3, sigy3);
+                            ////  self.submit_vote(header, U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26))
+                            //let handle = Handle {
+                                //message: Message::SubmitVote("deadbeef".to_string(), U256::from(0), U256::from(5), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(26)),
+                                //answer_channel: Some(answer_tx),
+                            //};
+                            //rc.contract_channel.send(handle);
                         },
                         "/contract/get-all" => {
                             let (answer_tx, answer_rx) = channel::bounded(1);
@@ -399,6 +432,36 @@ impl ApiServer {
                             };
                             respond_result!(request, true, format!("{:?}", chain_len));
                         },
+                        "/contract/add-side-node" => {
+                            let (answer_tx, answer_rx) = channel::bounded(1);
+                            let handle = Handle {
+                                message: Message::AddSideNode(0),
+                                answer_channel: Some(answer_tx),
+                            };
+                            rc.contract_channel.send(handle);
+                            let chain_len = match answer_rx.recv() {
+                                Ok(answer) => {
+                                    match answer {
+                                        Answer::Success(response) => {
+                                            match response {
+                                                ContractResponse::SyncChain(chain_len) => chain_len,
+                                                _ => {
+                                                    panic!("answer to GetScaleNodes: invalid response type");
+                                                },
+                                            }
+                                        },
+                                        Answer::Fail(reason) => {
+                                            respond_result!(request, false, format!("contract query fails {}", reason));
+                                            return;
+                                        },
+                                    }
+                                },
+                                Err(e) => {
+                                    respond_result!(request, false, format!("contract channel broken"));
+                                    return;
+                                },
+                            };
+                        },
                         _ => {
                             println!("all other option {:?}", url.path());
                         }
@@ -410,6 +473,7 @@ impl ApiServer {
                 
             }     
         });
+        info!("API server listening");
     }
 }
 

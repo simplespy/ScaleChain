@@ -18,19 +18,21 @@ use crypto::sha2::Sha256;
 
 use std::sync::{Arc, Mutex};
 use std::{time};
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Write, BufReader, BufRead, Error};
 
-use crossbeam::channel::{Sender, Receiver};
+use crossbeam::channel::{self, Sender, Receiver};
+use mio_extras::channel as Mio_channel;
 use serde::{Serialize, Deserialize};
 use ethereum_tx_sign::RawTransaction;
 
 use mio_extras::channel::Sender as MioSender;
+use crate::experiment::snapshot::PERFORMANCE_COUNTER;
 
-use requests::{ToJson};
+//use requests::{ToJson};
 use log::{info, warn, error};
 
-const ETH_CHAIN_ID: u32 = 3;
+const ETH_CHAIN_ID: u32 = 42;
 
 
 pub struct Contract {
@@ -39,21 +41,20 @@ pub struct Contract {
     key: BLSKey,
     contract_state: ContractState,
     contract_handle: Receiver<Handle>,
-    mempool: Arc<Mutex<Mempool>>,
     performer_sender: Sender<TaskRequest>,
     server_control_sender: MioSender<ServerSignal>,
     web3: web3::api::Web3<web3::transports::Http>,
-    chain: Arc<Mutex<BlockChain>>,
-    block_db: Arc<Mutex<BlockDb>>,
-    ip_addr: String
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Account {
+    ip_addr: String,
     rpc_url: String,
     contract_address: Address,
-    address: Address,
-    private_key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct Account {
+    //pub rpc_url: String,
+    //pub contract_address: Address,
+    pub address: Address,
+    pub private_key: String,
 }
 
 impl Contract {
@@ -63,18 +64,20 @@ impl Contract {
         performer_sender: Sender<TaskRequest>,
         server_control_sender: MioSender<ServerSignal>,
         contract_handle: Receiver<Handle>, 
-        mempool: Arc<Mutex<Mempool>>,
-        chain: Arc<Mutex<BlockChain>>,
-        block_db: Arc<Mutex<BlockDb>>,
-        ip_addr: String
+        ip_addr: String,
+        abi_path: String,
+        rpc_url: &str,
+        contract_address: &Address,
     ) -> Contract {
-        let (eloop, http) = web3::transports::Http::new(&account.rpc_url).unwrap();
+        let (eloop, http) = web3::transports::Http::new(rpc_url).unwrap();
         eloop.into_remote();
-
         let web3 = web3::api::Web3::new(http);
-        //let contract = EthContract::new(web3.eth(), account.contract_address, );
-        let contract = EthContract::from_json(web3.eth(), account.contract_address, include_bytes!("./abi.json")).unwrap();
-
+        let json_bytes = fs::read(&abi_path).expect("Unable to read abi file");
+        let contract = EthContract::from_json(
+            web3.eth(), 
+            contract_address.clone(), 
+            &json_bytes.clone()
+            ).unwrap();
         let contract = Contract{
             contract,
             key,
@@ -84,12 +87,53 @@ impl Contract {
             contract_state: ContractState::genesis(),
             contract_handle,
             web3,
-            mempool,
-            chain,
-            block_db,
-            ip_addr
+            ip_addr,
+            rpc_url: rpc_url.to_string(),
+            contract_address: contract_address.clone(),
         };
+        return contract;
+    }
 
+    pub fn instance(
+        account: &Account,
+        rpc_url: &str,
+        contract_address: &Address,
+    ) -> Contract {
+        let (eloop, http) = web3::transports::Http::new(rpc_url).unwrap();
+        eloop.into_remote();
+        let web3 = web3::api::Web3::new(http);
+        let json_bytes = fs::read("./scripts/abi.json").expect("Unable to read abi file");
+        let contract = EthContract::from_json(
+            web3.eth(), 
+            contract_address.clone(), 
+            &json_bytes.clone()
+            ).unwrap();
+        let (performer_sender, performer_receiver) = channel::unbounded();
+        let (server_control_sender, server_control_receiver) = Mio_channel::channel();
+        let (contract_handle_sender, contract_handle_receiver) = channel::unbounded();
+        let ip_addr = "127.0.0.1".to_owned();
+        let key_path = "./keyfile/node0";
+        let key_file = File::open(key_path).unwrap();
+        let key_str: BLSKeyStr = match serde_json::from_reader(key_file) {
+            Ok(k) => k,
+            Err(e) => {
+                panic!("unable to deser keyfile");
+            }
+        };
+        let key: BLSKey = BLSKey::new(key_str);
+        let contract = Contract{
+            contract,
+            key,
+            performer_sender,
+            server_control_sender,
+            my_account: account.clone(), 
+            contract_state: ContractState::genesis(),
+            contract_handle: contract_handle_receiver,
+            web3,
+            ip_addr,
+            rpc_url: rpc_url.to_owned(),
+            contract_address: contract_address.clone(),
+        };
         return contract;
     }
 
@@ -105,6 +149,7 @@ impl Contract {
                                 },
                                 Message::SubmitVote(header, sid, bid, sigx, sigy, bitset) => {
                                     self.submit_vote(header, sid, bid, sigx, sigy, bitset);
+                                    info!("{:?} submited to mainChain", self.ip_addr);
                                    // let header = _generate_random_header();
                                    // let (sigx, sigy) = _sign_bls(header.clone(), "node1".to_string());
                                    // let (sigx2, sigy2) = _sign_bls(header.clone(), "node2".to_string());
@@ -144,7 +189,10 @@ impl Contract {
                                 }
                                 Message::ResetChain(sid) => {
                                     self.reset_chain(sid);
-                                }
+                                },
+                                Message::AddSideNode(sid) => {
+                                    //self.add_side_node(sid);
+                                },
                                 //...
                                 _ => {
                                     warn!("Unrecognized Message");
@@ -170,7 +218,7 @@ impl Contract {
     pub fn get_prev_blocks(&self, start: usize, end: usize) -> Vec<EthBlkTransaction> {
         unimplemented!()
     }
-
+     
     pub fn get_scale_nodes(&self, handle: Handle) {
         let n = self._count_scale_nodes();
         let mut nodes = Vec::new();
@@ -188,6 +236,10 @@ impl Contract {
 
     }
 
+    pub fn get_address(&self) -> Address {
+        self.my_account.address.clone()
+    }
+
     pub fn count_scale_nodes(&self, handle: Handle){
         let num_scale_node = self._count_scale_nodes();
         info!("count_scale_nodes = {:?}", num_scale_node);
@@ -201,24 +253,31 @@ impl Contract {
 
     pub fn add_scale_node(&self, address: Address, ip_addr: String, x1: U256, x2: U256, y1: U256, y2: U256) {
         let nonce = self._transaction_count();
-        let function_abi = _encode_addScaleNode(address, ip_addr, x1, x2, y1, y2);
+        let function_abi = _encode_addScaleNode(address, ip_addr.clone() , x1, x2, y1, y2);
         let gas = self._estimate_gas(function_abi.clone());
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
-            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000)*200,
+            gas_price: ethereum_types::U256::from(1000000000),
             gas: _convert_u256(gas),
             data: function_abi
         };
 
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash = self._send_transaction(signed_tx);
-        if self.get_tx_receipt(tx_hash) {
-            println!("tx_hash = {:?}", tx_hash);
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    println!("tx_hash = {:?}", tx_hash);
+                }
+            },
+            Err(e) => {
+                info!("{:?} Error send_transaction {:?}", ip_addr, e);
+            }
         }
+        
     }
 
     pub fn add_side_node(&self, sid: U256, address: Address, ip_addr: String) {
@@ -230,7 +289,7 @@ impl Contract {
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
-            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
             value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
             gas: _convert_u256(gas),
@@ -239,11 +298,18 @@ impl Contract {
 
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash = self._send_transaction(signed_tx);
-        println!("{:?}", tx_hash);
-        if self.get_tx_receipt(tx_hash) {
-            println!("{:?}", tx_hash);
+
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    println!("tx_hash = {:?}", tx_hash);
+                }
+            },
+            Err(e) => {
+                info!("Error send_transaction {:?}", e);
+            }
         }
+        
     }
 
     pub fn delete_side_node(&self, sid: U256, tid: U256) {
@@ -255,7 +321,7 @@ impl Contract {
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
-            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
             value: ethereum_types::U256::zero(),
             gas_price: ethereum_types::U256::from(1000000000),
             gas: ethereum_types::U256::from(750000),
@@ -264,15 +330,19 @@ impl Contract {
 
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash = self._send_transaction(signed_tx);
-        println!("{:?}", tx_hash);
-        if self.get_tx_receipt(tx_hash) {
-            println!("{:?}", tx_hash);
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    println!("tx_hash = {:?}", tx_hash);
+                }
+            },
+            Err(e) => {
+                info!("Error send_transaction {:?}", e);
+            }
         }
     }
 
     pub fn submit_vote(&self, str_block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) {
-        info!("{:?} submit vote", self.ip_addr);
         let nonce = self._transaction_count();
         let private_key = _get_key_as_vec(self.my_account.private_key.clone());
         let function_abi = _encode_submitVote(str_block, sid, bid, sigx, sigy, bitset);
@@ -280,9 +350,9 @@ impl Contract {
         //  println!("{:?}", gas);
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
-            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000)*200,
+            gas_price: ethereum_types::U256::from(1000000000)*20, //20 Gwei
             gas: ethereum_types::U256::from(950000),
             data: function_abi
         };
@@ -292,11 +362,23 @@ impl Contract {
         //info!("key {:?}", key);
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
         //info!("ETH_CHAIN_ID {} signed tx {:?}", ETH_CHAIN_ID, signed_tx);
-        let tx_hash = self._send_transaction(signed_tx);
-        //info!("{:?} submitted vote", self.ip_addr);
-        if self.get_tx_receipt(tx_hash) {
-            println!("success tx_hash = {:?}", tx_hash);
+
+        //let tx_hash = self._send_transaction_ori(signed_tx);
+        //if self.get_tx_receipt(tx_hash) {
+            //println!("success tx_hash = {:?}", tx_hash);
+        //}
+
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    println!("tx_hash = {:?}", tx_hash);
+                }
+            },
+            Err(e) => {
+                info!("{:?} Error send_transaction {:?}", self.my_account.address , e);
+            }
         }
+        PERFORMANCE_COUNTER.record_submit_block_stop();
     }
 
     pub fn send_block(&self, block: Block)  {
@@ -311,9 +393,9 @@ impl Contract {
         let gas = self._estimate_gas(function_abi.clone());
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
-            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000)*200,
+            gas_price: ethereum_types::U256::from(1000000000) *20,
             gas: _convert_u256(gas),
             data: function_abi
         };
@@ -321,29 +403,24 @@ impl Contract {
 
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash = self._send_transaction(signed_tx);
-
-        if self.get_tx_receipt(tx_hash) {
-            let curr_state = self._get_curr_state(0);
-
-            // update local blockchain
-            let mut chain = self.chain.lock().unwrap();
-            chain.append(&curr_state);
-            drop(chain);
-            // update db blockchain
-            let mut block_db = self.block_db.lock().unwrap();
-            block_db.insert(&block);
-            drop(block_db);
-            // broadcast to peers
-            info!("broadcast to peer");
-            self.send_p2p(curr_state, block);
-        } else {
-            // return transaction back to mempool
-            warn!("get_tx_receipt fail");
-            let mut mempool = self.mempool.lock().expect("api change mempool size");
-            mempool.return_block(block);
-            drop(mempool);
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    let curr_state = self._get_curr_state(0);
+                    // update local blockchain
+                    // broadcast to peers
+                    info!("broadcast to peer");
+                    self.send_p2p(curr_state, block);
+                } else {
+                    warn!("get_tx_receipt fail");
+                }
+            },
+            Err(e) => {
+                info!("Error send_transaction {:?}", e);
+            }
         }
+
+        
     }
 
     pub fn estimate_gas(&self, block: Block) -> U256 {
@@ -375,6 +452,20 @@ impl Contract {
         let mut receipt = self._transaction_receipt(tx_hash.clone());
         while receipt.is_none() {
             receipt = self._transaction_receipt(tx_hash.clone());
+            match receipt {
+                Some(ref r) => {
+                    match r.gas_used {
+                        Some(g) => {
+                            let gas = g.as_usize();
+                            PERFORMANCE_COUNTER.record_gas_update(gas);
+                            break;
+                        },
+                        None => {},
+                    }
+                },
+                None => {},
+            }
+            
             if now.elapsed().as_secs() > 60 {
                 warn!("Transaction TimeOut");
                 return false;
@@ -398,15 +489,6 @@ impl Contract {
             map(|item| {
                 item.block   
             }).collect();
-
-
-        let mut chain = self.chain.lock().unwrap();
-        chain.replace(states);
-        drop(chain);
-
-        let mut block_db = self.block_db.lock().unwrap();
-        block_db.replace(blocks);
-        drop(block_db);
 
         let response = Response::SyncChain(chain_len);
         let answer = Answer::Success(response);
@@ -438,66 +520,100 @@ impl Contract {
                                   end = end,
                                   apikey = "UGEFW13C4HVZ9GGH5GWIRHQHYYPYKX7FCX");
 
-        let response = requests::get(request_url).unwrap();
-        let data = response.json().unwrap();
-        let txs = data["result"].clone();
+        //let response = requests::get(request_url).unwrap();
+        //let data = response.json().unwrap();
+       
+        //let resp = reqwest::blocking::get(request_url)?
+          //.json::<HashMap<String, String>>()?;
+        
+        
+        //let txs = data["result"].clone();
 
         let mut transactions: Vec<EthBlkTransaction> = vec![];
 
-        for tx in txs.members() {
-            if tx["input"].as_str().unwrap().len() < 10 {continue;}
-            let sig = &tx["input"].as_str().unwrap()[2..10];
-            let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
-            if sig == func_sig && isError == 0 {
-                let input = &tx["input"].as_str().unwrap()[10..];
-                let (block_ser, block_id) = _decode_sendBlock(input);
+        //for tx in txs.members() {
+            //if tx["input"].as_str().unwrap().len() < 10 {continue;}
+            //let sig = &tx["input"].as_str().unwrap()[2..10];
+            //let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
+            //if sig == func_sig && isError == 0 {
+                //let input = &tx["input"].as_str().unwrap()[10..];
+                //let (block_ser, block_id) = _decode_sendBlock(input);
                 
-                let mut hasher = Sha256::new();
-                hasher.input_str(&block_ser);
-                let mut block_hash = [0u8;32];
-                hasher.result(&mut block_hash);
-                let concat_str = [curr_hash, block_hash].concat();
-                let mut hasher = Sha256::new();
-                hasher.input(&concat_str);
-                hasher.result(&mut curr_hash);
+                //let mut hasher = Sha256::new();
+                //hasher.input_str(&block_ser);
+                //let mut block_hash = [0u8;32];
+                //hasher.result(&mut block_hash);
+                //let concat_str = [curr_hash, block_hash].concat();
+                //let mut hasher = Sha256::new();
+                //hasher.input(&concat_str);
+                //hasher.result(&mut curr_hash);
 
-                let state = ContractState{
-                    curr_hash: H256(curr_hash),
-                    block_id,
-                };
-                let block = match hex::decode(&block_ser) {
-                    Ok(bytes) => {
-                        match bincode::deserialize(&bytes[..]) {
-                            Ok(block) => block,
-                            Err(e) => {
-                                let mut block = Block::default();
-                                block.header.height = block_id;
-                                block.update_hash();
-                                block
-                            },
-                        }
-                    },
-                    Err(e) => {
-                        let mut block = Block::default();
-                        block.header.height = block_id;
-                        block.update_hash();
-                        block
-                    }
-                };
+                //let state = ContractState{
+                    //curr_hash: H256(curr_hash),
+                    //block_id,
+                //};
+                //let block = match hex::decode(&block_ser) {
+                    //Ok(bytes) => {
+                        //match bincode::deserialize(&bytes[..]) {
+                            //Ok(block) => block,
+                            //Err(e) => {
+                                //let mut block = Block::default();
+                                //block.header.height = block_id;
+                                //block.update_hash();
+                                //block
+                            //},
+                        //}
+                    //},
+                    //Err(e) => {
+                        //let mut block = Block::default();
+                        //block.header.height = block_id;
+                        //block.update_hash();
+                        //block
+                    //}
+                //};
                 
-                transactions.push(
-                    EthBlkTransaction{
-                        contract_state: state,
-                        block: block,
-                    }
-                 );
-            } 
-        }
+                //transactions.push(
+                    //EthBlkTransaction{
+                        //contract_state: state,
+                        //block: block,
+                    //}
+                 //);
+            //} 
+        //}
 
         return transactions;
     }
 
-    fn reset_chain(&self, sid: usize)  {
+    fn reset_side_node(&self, sid: usize)  {
+        let nonce = self._transaction_count();
+        let function_abi = _encode_resetSideChain(U256::from(sid));
+        let gas = self._estimate_gas(function_abi.clone());
+
+        let tx = RawTransaction {
+            nonce: _convert_u256(nonce),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
+            value: ethereum_types::U256::zero(),
+            gas_price: ethereum_types::U256::from(1000000000),
+            gas: _convert_u256(gas),
+            data: function_abi
+        };
+        let now = time::Instant::now();
+        let key = _get_key_as_H256(self.my_account.private_key.clone());
+        let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
+
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    println!("tx_hash = {:?}", tx_hash);
+                }
+            },
+            Err(e) => {
+                info!("Error send_transaction {:?}", e);
+            }
+        }
+    }
+
+    pub fn reset_chain(&self, sid: usize)  {
         let nonce = self._transaction_count();
         let function_abi = _encode_resetSideChain(U256::from(sid));
         let gas = self._estimate_gas(function_abi.clone());
@@ -506,19 +622,28 @@ impl Contract {
 
         let tx = RawTransaction {
             nonce: _convert_u256(nonce),
-            to: Some(ethereum_types::H160::from(self.my_account.contract_address.0)),
+            to: Some(ethereum_types::H160::from(self.contract_address.0)),
             value: ethereum_types::U256::zero(),
-            gas_price: ethereum_types::U256::from(1000000000)*200,
+            gas_price: ethereum_types::U256::from(1000000000),
             gas: _convert_u256(gas),
             data: function_abi
         };
         let now = time::Instant::now();
         let key = _get_key_as_H256(self.my_account.private_key.clone());
         let signed_tx = tx.sign(&key, &ETH_CHAIN_ID);
-        let tx_hash = self._send_transaction(signed_tx);
-        if self.get_tx_receipt(tx_hash) {
-            println!("{:?},{:?}", tx_hash, now.elapsed().as_secs());
+        match self._send_transaction(signed_tx) {
+            Ok(tx_hash) => {
+                if self.get_tx_receipt(tx_hash) {
+                    println!("tx_hash = {:?}", tx_hash);
+                }
+            },
+            Err(e) => {
+                info!("Error send_transaction {:?}", e);
+            }
         }
+
+
+        
     }
 
     fn _get_blk_id(&self, sid: usize) -> U256 {
@@ -555,12 +680,12 @@ impl Contract {
         }
     }
 
-    fn _get_curr_state(&self, sid: usize) -> ContractState {
+    pub fn _get_curr_state(&self, sid: usize) -> ContractState {
         let hash = self._get_curr_hash(sid);
         let blk_id = self._get_blk_id(sid);
         ContractState {
             curr_hash: hash.into(),
-            block_id: blk_id.as_usize(),
+            block_id: blk_id.as_u64(),
         }
     }
 
@@ -572,19 +697,20 @@ impl Contract {
         cnt.as_usize()
     }
 
-    fn _get_scale_node(&self, index: usize) -> Address {
+    pub fn _get_scale_node(&self, index: usize) -> Address {
         self.contract
             .query("getScaleNode", (web3::types::U256::from(index), ), None, EthOption::default(), None)
             .wait()
             .unwrap()
     }
 
-    pub fn _get_scale_id(&self, addr: Address) -> U256 {
-        self.contract
+    pub fn _get_scale_id(&self, addr: Address) -> Option<U256> {
+        match self.contract
             .query("getScaleID", (addr), None, EthOption::default(), None)
-            .wait()
-            .unwrap()
-
+            .wait() {
+            Ok(u) => Some(u),
+            Err(e) => None,
+        }
     }
 
     pub fn _get_scale_pub_key(&self, addr: Address) -> (U256, U256, U256, U256) {
@@ -595,11 +721,17 @@ impl Contract {
 
     }
 
-    fn _send_transaction(&self, signed_tx: Vec<u8>) -> web3::types::H256 {
+    fn _send_transaction_ori(&self, signed_tx: Vec<u8>) -> web3::types::H256 {
         self.web3.eth()
             .send_raw_transaction(Bytes::from(signed_tx))
             .wait()
             .unwrap()
+    }
+
+    fn _send_transaction(&self, signed_tx: Vec<u8>) -> Result<web3::types::H256, web3::error::Error> {
+        self.web3.eth()
+            .send_raw_transaction(Bytes::from(signed_tx))
+            .wait() 
     }
 
     fn _transaction_receipt(&self, tx_hash: web3::types::H256) -> Option<TransactionReceipt> {
@@ -616,7 +748,7 @@ impl Contract {
     fn _estimate_gas(&self, data: Vec<u8>) -> U256 {
         let call_request = CallRequest {
             from: Some(H160::from(self.my_account.address.0)),
-            to: H160::from(self.my_account.contract_address.0),
+            to: H160::from(self.contract_address.0),
             gas_price: Some(U256::from(1000000000u64)),
             gas: Some(U256::zero()),
             data: Some(Bytes::from(data)),

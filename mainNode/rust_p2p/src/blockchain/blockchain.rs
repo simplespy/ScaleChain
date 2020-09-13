@@ -13,6 +13,7 @@ pub struct BlockChain {
 impl BlockChain {
     pub fn new() -> BlockChain {
         let genesis = ContractState::default();
+        //PERFORMANCE_COUNTER.record_chain_update();
         BlockChain {
             blockchain: vec![genesis],
         } 
@@ -53,8 +54,8 @@ impl BlockChain {
     }
 
     // block id should start at 0, so is consistent with height
-    pub fn get_height(&self) -> usize {
-        self.blockchain.len() 
+    pub fn get_height(&self) -> u64 {
+        self.blockchain.len() as u64
     }
 
     pub fn get_latest_state(&self) -> Option<ContractState> {

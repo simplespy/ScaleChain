@@ -27,23 +27,22 @@ pub fn convert_parity_to_symbol(parities: Vec<Vec<u64>>, n: u64) -> Vec<Vec<u64>
 }
 
 //Read all codes for all coded Merkle tree layers
- pub fn read_codes(k_set: Vec<u64>) -> (Vec<Code>, Vec<Code>) {
+ pub fn read_codes(k_set: Vec<u64>, filepath: &str) -> (Vec<Code>, Vec<Code>) {
 	let mut codes_for_encoding: Vec<Code> = vec![];
 	let mut codes_for_decoding: Vec<Code> = vec![];
 	for i in k_set.iter() {
-		let (code_e, code_d) = read_code_from_file(*i);
+		let (code_e, code_d) = read_code_from_file(*i, filepath);
 		codes_for_encoding.push(code_e);
 		codes_for_decoding.push(code_d);
 	}
 	(codes_for_encoding, codes_for_decoding)
 }
 
-pub fn read_code_from_file(k: u64) -> (Code, Code) {
+pub fn read_code_from_file(k: u64, filepath: &str) -> (Code, Code) {
     //compute number of coded symbols
 	let n = ((k as f32) / RATE ) as u64;
-
 	//Read encoding matrix
-	let filename = String::from("../src/LDPC_codes/k=") + &k.to_string() + &String::from("_encode.txt");
+	let filename = String::from(filepath) + "/k=" +  &k.to_string() + &String::from("_encode.txt");
     // Open the file in read-only mode (ignoring errors).
     let file = File::open(filename).expect("unable to read file");
     let reader = BufReader::new(file);
@@ -57,7 +56,7 @@ pub fn read_code_from_file(k: u64) -> (Code, Code) {
     }
 
     //Read decodeing matrix
-    let filename = String::from("../src/LDPC_codes/k=") + &k.to_string() + &String::from("_decode.txt");
+    let filename = String::from(filepath) + "/k=" + &k.to_string() + &String::from("_decode.txt");
     // Open the file in read-only mode (ignoring errors).
     let file = File::open(filename).expect("unable to deocding matrix");
     let reader = BufReader::new(file);

@@ -1,7 +1,7 @@
 use super::mempool::mempool::Mempool;
 use super::hash::{H256};
 //use super::block::{Transaction, Input, Output};
-
+use rand::rngs::ThreadRng;
 use std::sync::{Mutex, Arc};
 use std::thread;
 use std::fs::File;
@@ -13,9 +13,10 @@ use primitives::bytes::Bytes;
 use rand::distributions::WeightedIndex;
 use rand::distributions::Distribution;
 use rand::seq::SliceRandom;
-use std::time;
+use std::time::{self, SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
 
-use requests::{ToJson};
+//use requests::{ToJson};
 use rand::Rng;
 
 pub enum TxGenSignal {
@@ -107,12 +108,12 @@ impl TransactionGenerator {
                         };
                         let interval = time::Duration::from_micros(interval);
                         thread::sleep(interval);
-                        //info!("mempool is full >= throttle: {}", throttle);
                         continue;
                     }
                 }
 
-                let transaction = self.generate_trans(1);
+                let transaction = self.generate_trans(1000);
+                let now = SystemTime::now();
                 self.send_to_mempool(transaction);
 
                 // sleep interbal
@@ -144,9 +145,7 @@ impl TransactionGenerator {
 
     fn send_to_mempool(&mut self, transactions: Vec<Transaction>) {
         let mut mempool = self.mempool.lock().expect("tx gen lock mempool");
-        for tx in transactions {
-            mempool.insert(tx);
-        }
+        mempool.insert_transactions(transactions);
         drop(mempool);
     }
 
@@ -171,40 +170,32 @@ impl TransactionGenerator {
 
     pub fn generate_trans(&self, num: usize) -> Vec<Transaction>  {
         let mut transactions: Vec<Transaction> = vec![];
+        let mut rng = rand::thread_rng();
+        //let now = SystemTime::now();
         for _ in 0..num {
-            transactions.push(self.create_transaction()); 
-            PERFORMANCE_COUNTER.record_generated_transactions();
+            let bytes_size = 128;
+            let input = TransactionInput {
+                previous_output: OutPoint::default(),
+                script_sig: Bytes::new_with_len(bytes_size), //magic
+                sequence: 0,
+                script_witness: vec![],
+            };
+            let output = TransactionOutput {
+                value: rng.gen(),
+                script_pubkey: Bytes::new_with_len(bytes_size),
+            };
+            let tx = Transaction {
+                version: 0,
+                inputs: vec![input],
+                outputs: vec![output] ,
+                lock_time: 0, 
+            };
+            transactions.push(tx); 
         }
+        //info!("elapsed {:?}", now.elapsed().unwrap());
+        PERFORMANCE_COUNTER.record_generated_transactions(num);
         transactions
     }
-
-    fn create_transaction(&self)-> Transaction {
-        let mut rng = rand::thread_rng();
-        let bytes_size = 128;
-        let input = TransactionInput {
-            previous_output: OutPoint::default(),
-            script_sig: Bytes::new_with_len(bytes_size), //magic
-            sequence: 0,
-            script_witness: vec![],
-        };
-
-
-        let output = TransactionOutput {
-            value: rng.gen(),
-            script_pubkey: Bytes::new_with_len(bytes_size),
-        };
-
-
-        let tx = Transaction {
-            version: 0,
-            inputs: vec![input],
-            outputs: vec![output] ,
-            lock_time: 0, //rng.gen(),
-        };
-        tx
-    }
-
-
 
     fn generate_transaction_from_history(&self) -> Vec<Transaction> {
         // please change
@@ -226,47 +217,51 @@ impl TransactionGenerator {
                                   ////page = 1,
                                   ////offset = 1000);
         //println!("{:?}", request_url);
-        let response = requests::get(request_url).unwrap();
-        let data = response.json().unwrap();
-        let txs = data["result"].clone();
-        let mut i = 0;
-        for tx in txs.members() {
-            let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
+        //let response = requests::get(request_url).unwrap();
+        //let data = response.json().unwrap();
+        //let data = reqwest::blocking::get(&request_url).unwrap()
+           //.json::<HashMap<String, String>>().unwrap(); 
+        
+        
+        //let txs = data["result"].clone();
+        //let mut i = 0;
+        //for tx in txs.members() {
+            //let isError = tx["isError"].as_str().unwrap().parse::<i32>().unwrap();
 
-            if isError == 0 && tx["to"].as_str().unwrap() == "0x06012c8cf97bead5deae237070f9587f8e7a266d" {
-                ////if isError == 0 && tx["to"].as_str().unwrap() == "0x1985365e9f78359a9b6ad760e32412f4a445e862" {
+            //if isError == 0 && tx["to"].as_str().unwrap() == "0x06012c8cf97bead5deae237070f9587f8e7a266d" {
+                //////if isError == 0 && tx["to"].as_str().unwrap() == "0x1985365e9f78359a9b6ad760e32412f4a445e862" {
 
 
-                let mut transaction = Transaction::default();
-                let content = String::from(tx["input"].as_str().unwrap()).replace("0x", "");
-                let mut txinput = TransactionInput::coinbase(Bytes::from(hex::decode(content.as_str()).expect("decode error")));
-                transaction.inputs.push(txinput);
-                //let tx_hash = String::from(tx["hash"].as_str().unwrap());
+                //let mut transaction = Transaction::default();
                 //let content = String::from(tx["input"].as_str().unwrap()).replace("0x", "");
-                //let address = String::from(tx["from"].as_str().unwrap());
-                //let gas_used = String::from(tx["gas"].as_str().unwrap());
-                //let gas_used = usize::from_str_radix(&gas_used, 10).unwrap();
-                i += 1;
-                //file.write_all(format!("{},{}\n",i,gas_used).as_bytes());
-                //let mut tx = Transaction{
-                    //inputs: vec![Input {
-                        //tx_hash: H256::from(tx_hash),
-                        //index: 0,
-                        //unlock: H256::new(),
-                        //content: hex::decode(&content).unwrap()
-                    //}],
-                    //outputs: vec![Output {
-                        //address: self.my_addr[0],
-                        //value: 10
-                    //}],
-                    //is_coinbase: false,
-                    //hash: H256::default()
-                //};
-                //tx.update_hash();
-                transactions.push(transaction);
-            }
-        }
-        println!("generate {} txs from history", transactions.len());
+                //let mut txinput = TransactionInput::coinbase(Bytes::from(hex::decode(content.as_str()).expect("decode error")));
+                //transaction.inputs.push(txinput);
+                ////let tx_hash = String::from(tx["hash"].as_str().unwrap());
+                ////let content = String::from(tx["input"].as_str().unwrap()).replace("0x", "");
+                ////let address = String::from(tx["from"].as_str().unwrap());
+                ////let gas_used = String::from(tx["gas"].as_str().unwrap());
+                ////let gas_used = usize::from_str_radix(&gas_used, 10).unwrap();
+                //i += 1;
+                ////file.write_all(format!("{},{}\n",i,gas_used).as_bytes());
+                ////let mut tx = Transaction{
+                    ////inputs: vec![Input {
+                        ////tx_hash: H256::from(tx_hash),
+                        ////index: 0,
+                        ////unlock: H256::new(),
+                        ////content: hex::decode(&content).unwrap()
+                    ////}],
+                    ////outputs: vec![Output {
+                        ////address: self.my_addr[0],
+                        ////value: 10
+                    ////}],
+                    ////is_coinbase: false,
+                    ////hash: H256::default()
+                ////};
+                ////tx.update_hash();
+                //transactions.push(transaction);
+            //}
+        //}
+        //println!("generate {} txs from history", transactions.len());
         return transactions;
 
     }

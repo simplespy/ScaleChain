@@ -12,6 +12,7 @@ use primitives::bytes::{Bytes};
 use chain::decoder::{Symbol};
 use chain::big_array::{BigArray};
 use super::primitive::block::ContractState;
+use web3::types::Address;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Samples {
@@ -48,14 +49,15 @@ pub enum Message {
     Ping(String),
     Pong(String),
     SyncBlock(EthBlkTransaction),
-    SendTransaction(Vec<u8>), //Transaction
+    SendTransaction(Vec<u8>), 
     PassToken(Token),
-    ProposeBlock((Vec<u8>, usize)), //BlockHeader block_id //sender is client
-    ScaleReqChunks(Vec<u32>), //(id), // sender is scalenode
-    ScaleReqChunksReply(Samples),
-    MySign(String, usize, usize, String, String, usize),
+    //ip(pubkey) BlockHeader block_id //sender is client
+    ProposeBlock(SocketAddr, u64, Vec<u8>), 
+    ScaleReqChunks(SocketAddr, u64, Vec<u32>), //(id), // sender is scalenode
+    ScaleReqChunksReply(SocketAddr, u64, Samples),
+    MySign(String, u64, u64, String, String, u64),
     ScaleGetAllChunks(ContractState), // blockheader
-    ScaleGetAllChunksReply((Option<Samples>, usize)),
+    ScaleGetAllChunksReply((Option<Samples>, u64)),
 }
 
 

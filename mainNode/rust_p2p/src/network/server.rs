@@ -50,6 +50,14 @@ impl Handle{
         self.control_tx.send(ServerSignal::ServerConnect(connect_handle.clone()));       
         Ok(receiver)
     }
+
+    pub fn broadcast(
+        &mut self, 
+        msg: Message
+    ) { // -> std::io::Result<mpsc::Receiver<ConnectResult>> {
+        self.control_tx.send(
+            ServerSignal::ServerBroadcast(msg));       
+    }
 }
 
 impl Context {

@@ -10,6 +10,7 @@ use super::contract::utils;
 use std::sync::{Arc, Mutex};
 use std::net::SocketAddr;
 use super::blockchain::blockchain::{BlockChain};
+use super::mempool::mempool::{Mempool};
 use std::collections::HashMap;
 use super::db::blockDb::{BlockDb};
 use chain::block::Block as SBlock;
@@ -31,11 +32,12 @@ use super::experiment::snapshot::PERFORMANCE_COUNTER;
 pub struct Manager {
     pub contract_handler: Sender<Handle>,
     pub chain: Arc<Mutex<BlockChain>>, 
+    pub mempool: Arc<Mutex<Mempool>>, 
     pub block_db: Arc<Mutex<BlockDb>>,
     pub server_control_sender: MioSender<ServerSignal>,
     pub addr: SocketAddr,
-    pub manager_sink: Receiver<(usize, Option<Samples>)>,
-    pub chunk_senders: HashMap<usize, Sender<Option<Samples>> >,
+    pub manager_sink: Receiver<(u64, Option<Samples>)>,
+    pub chunk_senders: HashMap<u64, Sender<Option<Samples>> >,
     pub codes_for_encoding: Vec<Code>,
     pub codes_for_decoding: Vec<Code>,
     pub k_set: Vec<u64>,
@@ -60,24 +62,23 @@ fn is_sufficient_symbols(tree_idx: &Vec<Vec<u64>>) -> bool {
 
 // currently only handle one layer encoding
 fn collect_cmt_chunks(job_manager: JobManager) {
-    //info!("{:?} managing chunks", job_manager.addr);
     let chunk_receiver = &job_manager.chunk_receiver;
     let mut coll_symbols: Vec<Vec<Symbol>> = Vec::new();
     let mut coll_idx: Vec<Vec<u64>> = Vec::new();
     let mut is_first_recv = true;
     let start = SystemTime::now();
-    info!("{:?} start collect cmt for {:?}", job_manager.addr, job_manager.state);
+    //info!("{:?} start collect cmt for {:?}", job_manager.addr, job_manager.state);
     loop {
         // accumulate chunks
         match chunk_receiver.recv() {
             // accumulate chunks 
             Ok(chunk) => {
                 match chunk {
-                    None => info!("does not recv chunk"),
+                    None => (),//info!("does not recv chunk"),
                     Some(chunk) => {
                         let elapsed = start.elapsed();
                         let hash_str = utils::hash_header_hex(&chunk.header as &[u8]);
-                        info!("{:?} get hash_str  {:?} {:?}", job_manager.addr, hash_str, elapsed);
+                        //info!("{:?} get hash_str  {:?} {:?}", job_manager.addr, hash_str, elapsed);
                         let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();
 
                         let num_layer = job_manager.k_set.len();
@@ -85,8 +86,8 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                             is_first_recv = false;
                             coll_symbols = chunk.symbols.clone();
                             coll_idx = chunk.idx.clone();
-                            info!("coll_symbols {:?}", coll_symbols.len());
-                            info!("coll_idx {:?}", coll_idx.len());
+                            //info!("coll_symbols {:?}", coll_symbols.len());
+                            //info!("coll_idx {:?}", coll_idx.len());
                         } else {
                             for l in 0..num_layer {
                                 let symbols = &chunk.symbols[l];
@@ -130,6 +131,7 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                                             }
                                         }
                                     }
+                                    PERFORMANCE_COUNTER.record_confirmeded_transactions(transactions.len());
                                     // TODO
                                     let mut r = SBlock {
                                         block_header: header.clone(),
@@ -139,12 +141,11 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                                     };
 
                                     job_manager.block_source.send(Ok(r));
+                                    break;
                                 },
                                 Err(proof) => (),
                             };
                         }
-
-                        
                     }
                 }
             }
@@ -157,9 +158,10 @@ impl Manager {
     pub fn new(
         contract_handler: Sender<Handle>, 
         chain: Arc<Mutex<BlockChain>>,
+        mempool: Arc<Mutex<Mempool>>, //TODO for forgetting certain blocks
         server_control_sender: MioSender<ServerSignal>,
         addr: SocketAddr,     
-        manager_sink: Receiver<(usize, Option<Samples>)>,
+        manager_sink: Receiver<(u64, Option<Samples>)>,
         block_db: Arc<Mutex<BlockDb>>,
         codes_for_encoding: Vec<Code>,
         codes_for_decoding: Vec<Code>,
@@ -168,6 +170,7 @@ impl Manager {
         Manager {
             contract_handler: contract_handler,
             chain: chain,
+            mempool: mempool,
             server_control_sender: server_control_sender,
             addr: addr,
             chunk_senders: HashMap::new(),
@@ -182,16 +185,16 @@ impl Manager {
     // spawn a new thread pulling for update from mainchain 
     pub fn start(mut self){
         thread::spawn(move || {
-            let mut blocks_sink: HashMap<usize, Receiver<Result<SBlock, CodingErr>>> = HashMap::new();
-            let mut register_blocks: HashMap<usize, ContractState> = HashMap::new();
-            let mut ready_blocks: HashMap<usize, ContractState> = HashMap::new();
+            let mut blocks_sink: HashMap<u64, Receiver<Result<SBlock, CodingErr>>> = HashMap::new();
+            let mut register_blocks: HashMap<u64, ContractState> = HashMap::new();
+            let mut ready_blocks: HashMap<u64, ContractState> = HashMap::new();
             let mut longest_id = 0;
             let mut start = SystemTime::now();
 
             let check_hash = false;
 
             loop {
-                let mut rm: Vec<usize> = vec![];
+                let mut rm: Vec<u64> = vec![];
                 // check if any threads finish
                 for (block_id, block_sink) in &blocks_sink {
                     match block_sink.try_recv() {
@@ -201,10 +204,10 @@ impl Manager {
                             // a thread has finished processing cmt
                             match result {
                                 Ok(sblock) => {
-                                    info!("{:?} cmt finishes", self.addr);
+                                    //info!("{:?} cmt finishes", self.addr);
                                     rm.push(*block_id);
                                     let mut sblock_db = self.block_db.lock().unwrap();
-                                    sblock_db.insert_sblock(*block_id, sblock);
+                                    sblock_db.insert_sblock(*block_id as u64, sblock);
                                     drop(sblock_db);
 
                                     // update ready chain
@@ -214,53 +217,53 @@ impl Manager {
                                     // update blockchain
                                     let mut local_chain = self.chain.lock().unwrap();
                                     let tip_state = local_chain.get_latest_state().unwrap();
-                                    info!("{:?} tip_state {:?} longest_id {}", self.addr, tip_state, longest_id);
+                                    //info!("{:?} tip_state {:?} longest_id {}", self.addr, tip_state, longest_id);
 
                                     let mut curr_hash = tip_state.curr_hash.clone();
                                     // test if update block chain
                                     for i in (tip_state.block_id+1) .. (longest_id+1) {
                                         match ready_blocks.get(&i) {
-                                            None => info!("{:?} block {} is missing", self.addr, i),
+                                            None => (),//info!("{:?} block {} is missing", self.addr, i),
                                             Some(s) => {
-                                                info!("{:?} db get block {:?}", self.addr, i);
-                                                let mut sblock_db = self.block_db.lock().unwrap();
-                                                let header = match sblock_db.get_sblock(*block_id) {
-                                                    Some(b) => b.block_header.clone(),
-                                                    None => unreachable!(),
-                                                };
-                                                drop(sblock_db);
+                                                ////info!("{:?} db get block {:?}", self.addr, i);
+                                                //let mut sblock_db = self.block_db.lock().unwrap();
+                                                //let header = match sblock_db.get_sblock(*block_id as u64) {
+                                                    //Some(b) => b.block_header.clone(),
+                                                    //None => unreachable!(),
+                                                //};
+                                                //drop(sblock_db);
 
-                                                let mut hash  = [0u8; 32];
-                                                let header_bytes = serialize(&header);
-                                                // get hash in the same way as bls
-                                                let mut hasher = Sha256::new();;
-                                                hasher.input(&header_bytes);
-                                                hasher.result(&mut hash);
-                                                let hash_str = hex::encode(&hash);
-                                                info!("header hash {:?}", hash_str);
+                                                //let mut hash  = [0u8; 32];
+                                                //let header_bytes = serialize(&header);
+                                                //// get hash in the same way as bls
+                                                //let mut hasher = Sha256::new();;
+                                                //hasher.input(&header_bytes);
+                                                //hasher.result(&mut hash);
+                                                //let hash_str = hex::encode(&hash);
+                                                ////info!("header hash {:?}", hash_str);
 
-                                                //let mut curr_hash_str: String = hex::encode(&curr_hash.0);
-                                                let v = [ curr_hash.0, hash].concat();
-                                                let mut sec_hasher = Sha256::new();
-                                                let mut hash  = [0u8; 32];
-                                                sec_hasher.input(&v);
-                                                sec_hasher.result(&mut hash);
+                                                ////let mut curr_hash_str: String = hex::encode(&curr_hash.0);
+                                                //let v = [ curr_hash.0, hash].concat();
+                                                //let mut sec_hasher = Sha256::new();
+                                                //let mut hash  = [0u8; 32];
+                                                //sec_hasher.input(&v);
+                                                //sec_hasher.result(&mut hash);
 
-                                                // compare if smart contract hash equals to local
-                                                let new_hash = H256(hash);
-                                                info!("new hash {:?}", new_hash);
-                                                if  new_hash != s.curr_hash {
-                                                    info!("{:?}, inconsistent hash {:?} smart contract {} hash {:?}", 
-                                                          self.addr,
-                                                          new_hash, 
-                                                          i,
-                                                          s.curr_hash); 
-                                                    if check_hash{
-                                                        break; 
-                                                    }
-                                                }
+                                                //// compare if smart contract hash equals to local
+                                                //let new_hash = H256(hash);
+                                                ////info!("new hash {:?}", new_hash);
+                                                //if  new_hash != s.curr_hash {
+                                                    //info!("{:?}, inconsistent hash {:?} smart contract {} hash {:?}", 
+                                                          //self.addr,
+                                                          //new_hash, 
+                                                          //i,
+                                                          //s.curr_hash); 
+                                                    //if check_hash{
+                                                        //break; 
+                                                    //}
+                                                //}
 
-                                                info!("{:?} local chain update to {:?}", self.addr, s);
+                                                //info!("{:?} local chain update to {:?}", self.addr, s);
 
                                                 local_chain.append(s);
                                                 curr_hash = s.curr_hash;
@@ -313,6 +316,8 @@ impl Manager {
                                 Answer::Success(resp) => {
                                     match resp {
                                         ContractResponse::GetCurrState(state) => {
+                                            let mut mempool = self.mempool.lock().unwrap();
+                                            mempool.remove_block(state.block_id);
                                             let mut local_chain = self.chain.lock().unwrap();
                                             let tip_state = local_chain.get_latest_state().expect("blockchain does not have state");
                                             drop(local_chain);
@@ -325,7 +330,7 @@ impl Manager {
                                                     if self.chunk_senders.contains_key(&state.block_id) {
                                                         continue;
                                                     } 
-                                                    info!("{:?}, update start: mainchain new state {:?} tip_state {:?}", self.addr, state, tip_state);
+                                                    //info!("{:?}, update start: mainchain new state {:?} tip_state {:?}", self.addr, state, tip_state);
                                                     if longest_id < state.block_id {
                                                         longest_id = state.block_id;
                                                     }
@@ -354,7 +359,7 @@ impl Manager {
 
                                                     // broadcast get all chunks
                                                     let response_msg = Message::ScaleGetAllChunks(state.clone());
-                                                    info!("{:?} broadcase ScaleGetAllChunks {:?}", self.addr, state);
+                                                    //info!("{:?} broadcase ScaleGetAllChunks {:?}", self.addr, state);
                                                     let signal = ServerSignal::ServerBroadcast(response_msg);
                                                     self.server_control_sender.send(signal);
 

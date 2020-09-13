@@ -20,7 +20,7 @@ pub struct BlockHeader {
 	pub bits: Compact,
 	pub nonce: u32,
 	pub coded_merkle_roots_hashes: Vec<H256>,//hashes of the symbols on the top layer of coded Merkle tree
-    pub delimitor: Vec<u32>, // number of bytes in transactions 
+    //pub delimitor: Vec<u32>, // number of bytes in transactions 
 }
 
 impl BlockHeader {
@@ -241,7 +241,7 @@ impl fmt::Debug for BlockHeader {
 			.field("bits", &self.bits)
 			.field("nonce", &self.nonce)
 			.field("coded_merkle_roots_hashes", &self.coded_merkle_roots_hashes.len())
-            .field("delimitor", &self.delimitor)
+            //.field("delimitor", &self.delimitor)
 			.finish()
 	}
 }

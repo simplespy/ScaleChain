@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use crate::db::blockDb::{BlockDb};
 use crate::blockchain::blockchain::{BlockChain};
 use crate::mempool::mempool::{Mempool};
-use crate::mempool::scheduler;
+use crate::mempool::scheduler::{self, get_curr_slot};
 
 use super::message::{Message, TaskRequest, PeerHandle, Samples, ServerSignal};
 use super::contract::contract::{Contract};
@@ -34,8 +34,10 @@ use ser::{deserialize, serialize};
 use mio_extras::channel::Sender as MioSender;
 use super::cmtda::{BlockHeader};
 use hex;
-use std::time::{SystemTime, UNIX_EPOCH};
 use chain::constants::{BLOCK_SIZE, BASE_SYMBOL_SIZE, RATE, UNDECODABLE_RATIO};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use web3::types::{Address};
+use crate::experiment::snapshot::PERFORMANCE_COUNTER;
 
 pub struct Performer {
     task_source: Receiver<TaskRequest>,
@@ -45,14 +47,21 @@ pub struct Performer {
     scheduler_handler: Sender<scheduler::Signal>,
     contract_handler: Sender<Handle>,
     addr: SocketAddr,
-    proposer_by_addr: HashMap<SocketAddr, Sender<Samples> >,
+    proposal_by: HashMap<(SocketAddr, u64), Sender<Samples> >, //TODO cleanup memory
     key_file: String,
-    scale_id: usize,
+    scale_id: u64,
     agg_sig: Arc<Mutex<HashMap<String, (String, String, usize)>>>,
-    threshold: usize,
+    threshold: u64,
     server_control_sender: MioSender<ServerSignal>,
-    manager_source: Sender<(usize, Option<Samples>)>,
+    manager_source: Sender<(u64, Option<Samples>)>,
     num_nodes: u64,
+    bin_dir: String,
+    num_side: u64,
+    address: Address,
+    slot_time: u64,
+    sidenodes: Vec<SocketAddr>,
+    start_sec: u64,
+    start_millis: u64,
 }
 
 pub fn new(
@@ -64,11 +73,18 @@ pub fn new(
     contract_handler: Sender<Handle>,
     addr: SocketAddr,
     key_file: String,
-    scale_id: usize,
-    threshold: usize,
+    scale_id: u64,
+    threshold: u64,
     server_control_sender: MioSender<ServerSignal>,
-    manager_source: Sender<(usize, Option<Samples>)>,
+    manager_source: Sender<(u64, Option<Samples>)>,
     num_nodes: u64,
+    bin_dir: &str,
+    num_side: u64,
+    address: Address,
+    slot_time: u64,
+    sidenodes: Vec<SocketAddr>,
+    start_sec: u64,
+    start_millis: u64,
 ) -> Performer {
     Performer {
         task_source,
@@ -78,7 +94,7 @@ pub fn new(
         contract_handler: contract_handler,
         scheduler_handler: scheduler_handler,
         addr: addr,
-        proposer_by_addr: HashMap::new(),
+        proposal_by: HashMap::new(),
         key_file,
         scale_id,
         agg_sig: Arc::new(Mutex::new(HashMap::new())),
@@ -86,6 +102,13 @@ pub fn new(
         server_control_sender: server_control_sender,
         manager_source: manager_source,
         num_nodes: num_nodes,
+        bin_dir: bin_dir.to_string(),
+        num_side: num_side,
+        address: address,
+        slot_time: slot_time,
+        sidenodes: sidenodes,
+        start_sec: start_sec,
+        start_millis: start_millis,
     } 
 }
 
@@ -117,10 +140,31 @@ impl Performer {
         return local_hash;
     }
 
-    fn get_eth_transactions(&self, start: usize, end: usize) -> Vec<EthBlkTransaction> {
+    pub fn decide_node(&self, proposer_addr: &SocketAddr) -> bool {
+        let (curr_slot, elapsed) = get_curr_slot(self.start_sec, self.start_millis, self.slot_time);
+        let curr_id = curr_slot % self.sidenodes.len() as u64;
+        let sender_id = match self.sidenodes.
+            iter().
+            position(|x| x== proposer_addr) 
+        {
+            Some(i) => i as u64,
+            None => return false,
+        };
+
+        info!("sender id {:?}; curr id {}", sender_id, curr_id);
+
+        if sender_id  == curr_id {
+            true
+        } else {
+            warn!("wrong node {:?} {} propose, curr_id {}", proposer_addr, sender_id, curr_id);
+            false
+        }
+    }
+
+    fn get_eth_transactions(&self, start: u64, end: u64) -> Vec<EthBlkTransaction> {
         let (answer_tx, answer_rx) = channel::bounded(1);
         let handle = Handle {
-            message: ContractMessage::GetAll(([0 as u8;32], start, end)),
+            message: ContractMessage::GetAll(([0 as u8;32], start as usize, end as usize)),
             answer_channel: Some(answer_tx),
         };
         self.contract_handler.send(handle);
@@ -169,77 +213,77 @@ impl Performer {
 
     }
 
-    fn update_block(&self, main_node_block: EthBlkTransaction) {
-        let peer_state = main_node_block.contract_state;
-        let peer_block = main_node_block.block;
-        let mut chain = self.chain.lock().unwrap();
-        let local_state = match chain.get_latest_state() {
-            Some(s) => s,
-            None => {
-                info!("sync blockchain in performer");
-                let eth_transactions = self.get_eth_transactions(0, 0);         
-                let eth_states: Vec<ContractState> = eth_transactions.
-                    into_iter().
-                    map(|tx| {
-                        tx.contract_state
-                    }).collect();
-                chain.replace(eth_states);                              
-                chain.get_latest_state().expect("eth blockchain is empty")
-            }
-        };
+    //fn update_block(&self, main_node_block: EthBlkTransaction) {
+        //let peer_state = main_node_block.contract_state;
+        //let peer_block = main_node_block.block;
+        //let mut chain = self.chain.lock().unwrap();
+        //let local_state = match chain.get_latest_state() {
+            //Some(s) => s,
+            //None => {
+                //info!("sync blockchain in performer");
+                //let eth_transactions = self.get_eth_transactions(0, 0);         
+                //let eth_states: Vec<ContractState> = eth_transactions.
+                    //into_iter().
+                    //map(|tx| {
+                        //tx.contract_state
+                    //}).collect();
+                //chain.replace(eth_states);                              
+                //chain.get_latest_state().expect("eth blockchain is empty")
+            //}
+        //};
 
-        // 1. compute curr_hash locally using all prev blocks stored in block_db
-        if local_state.block_id+1 == peer_state.block_id {
-            let local_comp_hash = self.compute_local_curr_hash(
-                &peer_block, 
-                local_state.curr_hash
-            );
-            let local_comp_state = ContractState {
-                curr_hash: local_comp_hash,
-                block_id: chain.get_height() + 1,
-            };
+        //// 1. compute curr_hash locally using all prev blocks stored in block_db
+        //if local_state.block_id+1 == peer_state.block_id {
+            //let local_comp_hash = self.compute_local_curr_hash(
+                //&peer_block, 
+                //local_state.curr_hash
+            //);
+            //let local_comp_state = ContractState {
+                //curr_hash: local_comp_hash,
+                //block_id: chain.get_height() + 1,
+            //};
 
-            // peer is dishonest and lazy
-            if local_comp_hash != peer_state.curr_hash {
-                warn!("peer is dishonest and lazy");
-                drop(chain);
-                return;
-            }
+            //// peer is dishonest and lazy
+            //if local_comp_hash != peer_state.curr_hash {
+                //warn!("peer is dishonest and lazy");
+                //drop(chain);
+                //return;
+            //}
 
-            // get latest state from ethernet, check if peer is honest node
-            let eth_curr_state = self.get_eth_curr_state();
-            if local_comp_state == eth_curr_state {
-                info!("honest node -> update chain");
-                // honest -> need to sync up
-                // add to block database
-                let mut block_db = self.block_db.lock().unwrap();
-                block_db.insert(&peer_block);
-                drop(block_db);
-                // add to blockchain if not there
-                chain.insert(&peer_state);;
-            } else {
-                warn!("peer is malicious and complicated. TODO use some mechanism to remember it");
-                return;
-            }
-        } else if local_state.block_id == peer_state.block_id {
-            info!("local chain already synced");
-        } else if local_state.block_id+1 < peer_state.block_id {
-            info!("possibly lagging many nodes");
-            // possibly lagging many blocks, 
-            // 1. query get all from current chain height to current eth height
-            // 2. query peer to collect all blocks(the upper bound is unknown)
-            let miss_eth_transactions = self.get_eth_transactions(local_state.block_id, 0);
-            let mut block_db = self.block_db.lock().unwrap();
-            for eth_tx in miss_eth_transactions {
-                block_db.insert(&eth_tx.block);
-                chain.append(&eth_tx.contract_state);
-            }
-            drop(block_db);
-        } else {
-            panic!("local chain screw up, it is greater than eth chain");
-        }
-        drop(chain);
-    }
+            //// get latest state from ethernet, check if peer is honest node
+            //let eth_curr_state = self.get_eth_curr_state();
+            //if local_comp_state == eth_curr_state {
+                //info!("honest node -> update chain");
+                //// honest -> need to sync up
+                //// add to block database
+                //let mut block_db = self.block_db.lock().unwrap();
+                //block_db.insert(&peer_block);
+                //drop(block_db);
+                //// add to blockchain if not there
+                //chain.insert(&peer_state);;
+            //} else {
+                //warn!("peer is malicious and complicated. TODO use some mechanism to remember it");
+                //return;
+            //}
+        //} else if local_state.block_id == peer_state.block_id {
+            //info!("local chain already synced");
+        //} else if local_state.block_id+1 < peer_state.block_id {
+            //info!("possibly lagging many nodes");
+            //// possibly lagging many blocks, 
+            //// 1. query get all from current chain height to current eth height
+            //// 2. query peer to collect all blocks(the upper bound is unknown)
+            //let miss_eth_transactions = self.get_eth_transactions(local_state.block_id, 0);
+            //let mut block_db = self.block_db.lock().unwrap();
+            //for eth_tx in miss_eth_transactions {
+                //block_db.insert(&eth_tx.block);
+                //chain.append(&eth_tx.contract_state);
+            //}
+            //drop(block_db);
+        //} else {
+            //panic!("local chain screw up, it is greater than eth chain");
+        //}
+        //drop(chain);
+    //}
 
     fn perform(&mut self) {
         loop {
@@ -247,16 +291,18 @@ impl Performer {
             let peer_handle = task.peer.unwrap();
             match task.msg {
                 Message::Ping(info_msg) => {
-                    info!("receive Ping {}", info_msg);
-                    let response_msg = Message::Pong("pong".to_string());
+                    info!("{}", info_msg);
+                    let response_msg = Message::Pong(
+                        "hello Pong from ".to_string() + &self.addr.to_string()
+                        );
                     peer_handle.write(response_msg);
                 }, 
                 Message::Pong(info_msg) => {
-                    info!("receive Pong {}", info_msg);                  
+                    info!("{}", info_msg);                  
                 },
                 Message::SyncBlock(main_node_block) => {
                     info!("receive sync block");
-                    self.update_block(main_node_block);
+                    //self.update_block(main_node_block);
                 },
                 Message::SendTransaction(transaction_ser) => {
                     let transaction: Transaction = deserialize(&transaction_ser as &[u8]).unwrap();
@@ -268,25 +314,41 @@ impl Performer {
                     info!("{:?} receive token", self.addr);
                     self.scheduler_handler.send(scheduler::Signal::Data(token));
                 },
-                Message::ProposeBlock((header, block_id)) => {
+                Message::ProposeBlock(proposer_addr, block_id, header) => {
                     if self.scale_id > 0 {
                         let hash_str = utils::hash_header_hex(&header);
                         //info!("{:?} receive ProposeBlock: header hash: {:?}", self.addr, hash_str);
                         let local_addr = self.addr.clone();
                         
-                        let proposer_addr = peer_handle.addr;
+                        if !self.decide_node(&proposer_addr) {
+                            continue;
+                        }
+
+                        let (curr_slot, elapsed) = get_curr_slot(self.start_sec, self.start_millis, self.slot_time); 
+                        let true_block_id = curr_slot+1;
+                        if true_block_id != block_id {
+                            warn!("wrong block id {} != {} from {:?}", block_id, true_block_id, proposer_addr);
+                            continue;
+                        }
 
                         let (tx, rx) = channel::unbounded();
-                        self.proposer_by_addr.insert(proposer_addr, tx);
-                        // this scalenode receive propose block
+                        self.proposal_by.insert((proposer_addr, block_id), tx);
+
                         let response_msg = Message::ScaleReqChunks;
+                        let header_cmt: BlockHeader = deserialize(
+                            &header.clone() as &[u8]
+                            ).unwrap();
 
-                        let header_cmt: BlockHeader = deserialize(&header.clone() as &[u8]).unwrap();
-                        // hard coded
                         let num_symbol = BLOCK_SIZE/(BASE_SYMBOL_SIZE as u64) *((1.0/RATE) as u64);
-                        let samples_idx = get_sample_index(self.scale_id, num_symbol as usize, self.num_nodes); //self.scale_id 
+                        let samples_idx = get_sample_index(
+                            self.scale_id, 
+                            num_symbol, 
+                            self.num_nodes); 
 
-                        let response_msg = Message::ScaleReqChunks(samples_idx);
+                        let response_msg = Message::ScaleReqChunks(
+                            proposer_addr, // scalenode addr 
+                            block_id,
+                            samples_idx);
                         peer_handle.write(response_msg);
 
                         let keyfile = self.key_file.clone();
@@ -295,9 +357,14 @@ impl Performer {
                         let broadcaster = self.server_control_sender.clone();
                         let db = self.block_db.clone();
 
+                        let proposer_addr_local = proposer_addr; 
+                        let block_id_local = block_id;
                         let contract_handler = self.contract_handler.clone();
                         let num_nodes = self.num_nodes;
-                        
+                        let bin_dir = self.bin_dir.clone();
+                        let threshold = self.threshold as usize;
+                        let local_contract_handler = self.contract_handler.clone();
+                        PERFORMANCE_COUNTER.record_sign_block_update(block_id);
                         // timed loop
                         thread::spawn(move || {
                             let mut num_chunk = 0;
@@ -316,29 +383,45 @@ impl Performer {
                                     },
                                     Err(e) => info!("proposer error"),
                                 }
-                                info!("number stored chunks {} thresh {}", num_chunk, chunk_thresh);
                                 if num_chunk > chunk_thresh {
                                     // vote
                                     let header_str: String = hex::encode(&header);
                                     
-                                    let (sigx, sigy) = utils::_sign_bls(header_str.clone(), keyfile);
+                                    let (sigx, sigy) = utils::_sign_bls(header_str.clone(), keyfile, &bin_dir);
                                     let sid = 0;
-                                    let response_msg = Message::MySign(header_str.clone(), sid, block_id, sigx.clone(), sigy.clone(), scaleid);
+                                    let response_msg = Message::MySign(
+                                        header_str.clone(), 
+                                        sid, 
+                                        block_id, 
+                                        sigx.clone(), 
+                                        sigy.clone(), 
+                                        scaleid);
                                     let signal = ServerSignal::ServerBroadcast(response_msg);
-                                    
-                                    
+                                    broadcaster.send(signal);                                   
+
                                     let mut aggsig = local_aggsig.lock().unwrap();
                                     if aggsig.get(&header_str).is_none() {
                                         aggsig.insert(header_str.clone(),  (sigx.clone(), sigy.clone(), (1 << scaleid)));
+                                        drop(aggsig);
                                     } else {
                                         let ( x, y, bitset) = aggsig.get(&header_str).unwrap();
-                                        let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx, sigy);
+                                        let (sigx, sigy) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx, sigy, &bin_dir);
                                         let bitset = bitset + (1 << scaleid);
                                         aggsig.insert(
                                             header_str.clone(),  
                                             (sigx.clone(), sigy.clone(), bitset.clone()));
+                                        drop(aggsig);
+                                        if utils::_count_sig(bitset.clone()) >= threshold {
+                                            PERFORMANCE_COUNTER.record_sign_block_stop();
+                                            PERFORMANCE_COUNTER.record_submit_block_update(block_id);
+                                            let (answer_tx, answer_rx) = channel::bounded(1);
+                                            let handle = Handle {
+                                                message: ContractMessage::SubmitVote(header_str.clone(), U256::from(sid), U256::from(block_id), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
+                                                answer_channel: Some(answer_tx),
+                                            };
+                                            local_contract_handler.send(handle);
+                                        }
                                     }
-                                    broadcaster.send(signal);
                                     break;
                                 }
                             }
@@ -351,86 +434,76 @@ impl Performer {
                     if self.scale_id <= 0 {
                         continue;
                     }
-
                     // new
                     let decode_header = hex::decode(&header).unwrap();
                     let header_hash_str = utils::hash_header_hex(&decode_header);
-                    //info!("{:?} receive Mysign header hash: {:?}, header size {}", self.addr, header_hash_str, header.len());
                     let mut sigx = sigx;
                     let mut sigy = sigy;
-                    //info!("{:?} receive MySign message from node {:?}.", self.addr, scale_id);
                     // send to spawned thread like ScaleReqChunksReply
-
-                    let local_aggsig = self.agg_sig.clone();
-                    let mut aggsig = local_aggsig.lock().unwrap();
+                    let mut aggsig = self.agg_sig.lock().unwrap();
                     let threshold = (UNDECODABLE_RATIO*(self.num_nodes as f32)).ceil() as usize ;
-                    info!("num node {}", self.num_nodes);
 
                     if aggsig.get(&header).is_none() {
-                        //info!("{:?} Mysign first seen header", self.addr);
                         aggsig.insert(header.clone(),  (sigx, sigy, (1 << scale_id)));
                     } else {
                         let ( x, y, mut bitset) = aggsig.get(&header).unwrap().clone();
                         if (1 << scale_id) & bitset.clone() == 0 {
-                            info!("Mysign {:?} old bitste {}", self.addr, bitset);
-                            let (sigx_t, sigy_t) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx.clone(), sigy.clone());
+                            let (sigx_t, sigy_t) = utils::_aggregate_sig(x.to_string(), y.to_string(), sigx.clone(), sigy.clone(), &self.bin_dir);
                             sigx = sigx_t;
                             sigy = sigy_t;
                             bitset = bitset + (1 << scale_id);
                             aggsig.insert(header.clone(), (sigx.clone(), sigy.clone(), bitset.clone()));
                         }
-                        info!("signature num {} thresh {}", utils::_count_sig(bitset.clone()) , threshold);
                         if utils::_count_sig(bitset.clone()) >= threshold {
+                            PERFORMANCE_COUNTER.record_sign_block_stop();
+                            PERFORMANCE_COUNTER.record_submit_block_update(bid);
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
-                                message: ContractMessage::SubmitVote(header, U256::from(sid), U256::from(bid), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
+                                message: ContractMessage::SubmitVote(header.clone(), U256::from(sid), U256::from(bid), U256::from_dec_str(sigx.as_ref()).unwrap(), U256::from_dec_str(sigy.as_ref()).unwrap(), U256::from(bitset.clone())),
                                 answer_channel: Some(answer_tx),
                             };
-                            //info!("{:?} fake submit vote", self.addr);
                             self.contract_handler.send(handle);
-
-                            //info!("smart contarct update");
+                            aggsig.remove(&header);
                         }
                     }
+                    drop(aggsig)
                 },
-                Message::ScaleReqChunks(samples_idx) => {
+                Message::ScaleReqChunks(proposer_addr, block_id, samples_idx) => {
                     let sample_len = samples_idx.len();
                     // this client needs to prepare chunks in response to 
                     let mut mempool = self.mempool.lock().expect("lock mempool");
-                    let (header, symbols, idx) = mempool.sample_cmt(samples_idx);
-                    let header_bytes = serialize(&header);
+                    let (header, symbols, idx) = mempool.sample_cmt(
+                        block_id,
+                        samples_idx);
+                    drop(mempool);
 
+                    let header_bytes = serialize(&header);
                     let hash_str = utils::hash_header_hex(&header_bytes);
-                    //info!("{:?} recv {:?} ScaleReqChunks, header hash: {:?} ", self.addr, sample_len, hash_str);
-                    // this sends chunk to the scale node
-                    let chunks = Samples {
+                    let symbols = Samples {
                         header: header_bytes.into(),
                         symbols: symbols,
                         idx: idx,
                     };
-                    // this client needs to prepare chunks in response to scalenode
-
-                    let response_msg = Message::ScaleReqChunksReply(chunks);
+                    let response_msg = Message::ScaleReqChunksReply(
+                        self.addr, // only side nodes sends it == propser_addr
+                        block_id,
+                        symbols);
                     peer_handle.write(response_msg);
                 },
-                Message::ScaleReqChunksReply(chunks) => {
+                Message::ScaleReqChunksReply(proposer_addr, block_id, symbols) => {
                     if self.scale_id > 0 {
-                        let proposer_socket = peer_handle.addr ;
-                        //info!("{:?} receive ScaleReqChunksReply from {:?}", self.addr, proposer_socket);
-                        match &self.proposer_by_addr.get(&proposer_socket) {
+                        match &self.proposal_by.get(&(proposer_addr, block_id)) {
                             Some(sender) => {
-                                sender.send(chunks);
+                                sender.send(symbols);
                             },
-                            None => info!("case when no proposer but receive chunk reply"),
+                            None => error!("No proposer but receive chunk reply"),
                         }
-                        
                     } 
                 },
                 Message::ScaleGetAllChunks(state) => {
                     if self.scale_id > 0 {
-                        //info!("{:?} receive ScaleGetAllChunks {:?}", self.addr, state);
                         let local_db = self.block_db.lock().unwrap();
-                        let chunk = local_db.get_chunk(state.block_id);
+                        let chunk = local_db.get_chunk(state.block_id as u64);
                         drop(local_db);
                         let response_msg = match chunk {
                             Some(chunk) => Message::ScaleGetAllChunksReply((Some(chunk), state.block_id)),
@@ -449,8 +522,8 @@ impl Performer {
 }
 
 // scale id starts at 1
-pub fn get_sample_index(scale_id: usize, num_trans: usize, num_node: u64) -> Vec<u32> {
-    let num_sample = ((num_trans as f32) / (num_node as f32)).ceil() as usize;
+pub fn get_sample_index(scale_id: u64, num_trans: u64, num_node: u64) -> Vec<u32> {
+    let num_sample = ((num_trans as f32) / (num_node as f32)).ceil() as u64;
     let mut sample_idx = vec![];
     let start = (scale_id-1)*num_sample;
     let stop = if scale_id*num_sample > num_trans {

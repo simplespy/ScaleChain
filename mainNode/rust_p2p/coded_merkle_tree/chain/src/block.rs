@@ -93,9 +93,8 @@ impl Block {
             block_size_in_bytes: block_size
         };
 		//Compute coded Merkle tree and hashes of the last layer from the transactions	
-		let (trans_size, root_hashes, tree, delimitors) = block.coded_merkle_roots(header_size, RATE, codes.to_vec(), correct);
+		let (trans_size, root_hashes, tree) = block.coded_merkle_roots(header_size, RATE, codes.to_vec(), correct);
 		let mut new_header = header;// block.block_header.clone();
-        new_header.delimitor = delimitors;
         //new_header.num_symbols 
         
 		// Merkle root from transactions
@@ -137,18 +136,15 @@ impl Block {
 
 	//Returns hashes of the symbols on the top layer of coded Merkle tree 
 	//#[cfg(any(test, feature = "test-helpers"))]
-	pub fn coded_merkle_roots(&self, header_size: u32, rate: f32, codes: Vec<Code>, correct: Vec<bool>) -> (usize, Vec<H256>, Vec<Symbols>, Vec<u32>) {
+	pub fn coded_merkle_roots(&self, header_size: u32, rate: f32, codes: Vec<Code>, correct: Vec<bool>) -> (usize, Vec<H256>, Vec<Symbols>) {
 		//Convert transactions into bytes and concatenate them into a Vec<u8>
         let start = SystemTime::now(); 
 		let mut trans_byte = self.transactions.iter().map(Transaction::bytes).collect::<Vec<Bytes>>();
         let transaction_size = trans_byte.len();
-        let mut delimitor: Vec<u32> = vec![0];
 		let mut data: Vec<u8> = vec![];
 		for j in 0..trans_byte.len(){
 			data.append(&mut trans_byte[j].clone().into());
-            delimitor.push(data.len() as u32);
 		}
-        //self.block_header.len = delimitor;
 		let transactions_size_in_bytes = data.len();
 
 		//Append random data to meet target BLOCK_SIZE
@@ -194,7 +190,7 @@ impl Block {
         let (roots, tree) = modular_code_merkle_roots(&symbols, header_size, rate, codes, correct);
 
         //println!("CMT construted root num {} {:?}", roots.len(), start.elapsed());
-		(transaction_size, roots, tree, delimitor)
+		(transaction_size, roots, tree)
 	}
 
 	//Returns a Merkle proof for some symbol index at some level of the coded merkle tree

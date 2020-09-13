@@ -66,7 +66,7 @@ pub struct Mempool {
     contract_handler: Sender<Handle>,
     schedule_handler: Sender<scheduler::Signal>,
     returned_blocks: VecDeque<Block>,
-    cmt_block: Option<CMTBlock>,
+    block_by: HashMap<u64, CMTBlock>,
     addr: SocketAddr,
     codes_for_encoding: Vec<Code>,
     codes_for_decoding: Vec<Code>,
@@ -82,12 +82,12 @@ impl Mempool {
     ) -> Mempool {
         
         Mempool {
-            transactions: VecDeque::new(), 
+            transactions: VecDeque::with_capacity(30000), 
             block_size: BLOCK_SIZE as usize, // in bytes
             contract_handler: contract_handler,
             schedule_handler: schedule_handler,
             returned_blocks: VecDeque::new(),
-            cmt_block: None,
+            block_by: HashMap::new(),
             addr: addr,
             codes_for_encoding: codes_for_encoding,
             codes_for_decoding: codes_for_decoding,
@@ -116,10 +116,11 @@ impl Mempool {
         self.returned_blocks.push_back(block);
     }
 
-
-    // TODO currently we ask the block to give us random chunks
-    pub fn sample_cmt(&mut self, sample_idx: Vec<u32>) -> (BlockHeader, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
-        match &self.cmt_block {
+    pub fn sample_cmt(&mut self, 
+        block_id: u64, 
+        sample_idx: Vec<u32>,
+    )-> (BlockHeader, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
+        match self.block_by.get(&block_id) {
             None => panic!("I don't have cmt block"),
             Some(cmt_block) => {
                 let num = sample_idx.len();
@@ -148,8 +149,8 @@ impl Mempool {
     }
 
     // currently a hack, need to combine with sample_cmt
-    pub fn get_cmt_header(&self) -> BlockHeader {
-        match &self.cmt_block {
+    pub fn get_cmt_header(&self, block_id: u64) -> BlockHeader {
+        match &self.block_by.get(&block_id) {
             None => panic!("I don't have cmt block"),
             Some(cmt_block) => cmt_block.block_header.clone(),
         }
@@ -186,11 +187,8 @@ impl Mempool {
         //}
     }
 
-    pub fn prepare_cmt_block(&mut self) -> Option<BlockHeader> {
-        if self.transactions.len() == 0 {
-            info!("{:?} no transaction", self.addr); 
-            return None;
-        }
+    pub fn prepare_cmt_block(&mut self, block_id: u64) -> Option<BlockHeader> {
+        let mut rng = rand::thread_rng();
 
         // get CMT
         let header = BlockHeader {
@@ -199,9 +197,8 @@ impl Mempool {
             merkle_root_hash: CMTH256::default(),
             time: 4u32,
             bits: 5.into(),
-            nonce: 0,//rng.gen(),
+            nonce: rng.gen(),
             coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
-            delimitor: vec![],
         };
         // CMT - propose block
         // let transaction_size = Transaction::bytes(&self.transactions[0]).len();
@@ -209,8 +206,10 @@ impl Mempool {
 
         let mut transactions: Vec<Transaction> = Vec::new();
         self.package_trans(&mut transactions);
+        info!("num trans in block {}", transactions.len());
 
         let start = SystemTime::now();
+        // autopad transactions
         let (block, trans_len) = CMTBlock::new(
             header.clone(), 
             &transactions, 
@@ -219,15 +218,21 @@ impl Mempool {
             &self.codes_for_encoding, 
             vec![true; self.codes_for_encoding.len()]
         );
+        //PERFORMANCE_COUNTER.record_generated_transaction();
 
         let cmt_header = block.block_header.clone();
-        self.cmt_block = Some(block);
+        self.block_by.insert(block_id, block);
 
         return Some(cmt_header);
     }
 
     pub fn len(&self) -> usize {
         self.transactions.len()
+    }
+
+    pub fn remove_block(&mut self, block_id: u64) {
+        info!("mempool remove {}", block_id);
+        self.block_by.remove(&block_id);
     }
 
     
@@ -237,6 +242,16 @@ impl Mempool {
 
         // need to truncate 
         if tx_bytes_size > 0 {//self.block_size {
+            self.schedule_handler.send(scheduler::Signal::Control);
+        }
+    }
+
+
+    pub fn insert_transactions(&mut self, transactions: Vec<Transaction>) {
+        self.transactions.extend(transactions);
+        let tx_bytes_size = self.transaction_size_in_bytes();
+        //info!("tx_bytes_size {} num {}", tx_bytes_size, self.transactions.len());
+        if tx_bytes_size > self.block_size {
             self.schedule_handler.send(scheduler::Signal::Control);
         }
     }

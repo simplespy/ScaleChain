@@ -6,7 +6,7 @@ use super::merkle::{MerkleHash};
 #[derive(Serialize, Deserialize, Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ContractState {
     pub curr_hash: H256,
-    pub block_id: usize,
+    pub block_id: u64,
 }
 
 impl ContractState {

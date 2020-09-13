@@ -30,10 +30,10 @@ pub const UNDECODABLE_RATIO: f32 = 0.9; // > 1 - 0.124
 //Configuration file for construction of coded Merkle tree
 
 //size of transactions in a block in bytes
-pub const BLOCK_SIZE: u64 = 4194304;//65536;//;16384  131072//131072;//131072;//;//131072; //32768;//10000;//131072; 40000 65535 4800 65535
+pub const BLOCK_SIZE: u64 = 4194304;//4194304 //65536;//;16384  131072//131072;//131072;//;//131072; //32768;//10000;//131072; 40000 65535 4800 65535
 
 //size of a symbol on the base layer in bytes
-pub const BASE_SYMBOL_SIZE: usize = 32768;//32768;//1024;//32768;//1024;
+pub const BASE_SYMBOL_SIZE: usize = 32768;//32768;//32768;//1024;//32768;//1024;
 
 //number of hashes to aggregate to form a new symbol on the upper layers of CMT
 pub const AGGREGATE: usize = 8;

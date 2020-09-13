@@ -40,7 +40,7 @@ impl BLSKey {
 }
 
 pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json sendBlock -p {} -p {} -p {}", block, signature, new_blk_id);
+    let command = format!("./ethabi encode function --lenient ./abi.json sendBlock -p {} -p {} -p {}", block, signature, new_blk_id);
     //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
@@ -53,7 +53,7 @@ pub fn _encode_sendBlock(block: String, signature: String, new_blk_id: U256) -> 
 pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U256, y1: U256, y2: U256) -> Vec<u8> {
     let addr = hex::encode(address.as_bytes());
     //let addr = addr.replace("0x", "");
-    let command = format!("ethabi encode function --lenient ./abi.json addScaleNode -p {} -p {} -p {} -p {} -p {} -p {}", addr, ip_addr, x1, x2, y1, y2);
+    let command = format!("./ethabi encode function --lenient ./abi.json addScaleNode -p {} -p {} -p {} -p {} -p {} -p {}", addr, ip_addr, x1, x2, y1, y2);
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -66,7 +66,7 @@ pub fn _encode_addScaleNode(address: Address, ip_addr: String, x1: U256, x2: U25
 pub fn _encode_addSideNode(sid: U256, address: Address, ip_addr: String) -> Vec<u8> {
     let addr = hex::encode(address.as_bytes());
     //let addr = addr.replace("0x", "");
-    let command = format!("ethabi encode function --lenient ./abi.json addSideNode -p {} -p {} -p {}", sid, addr, ip_addr);
+    let command = format!("./ethabi encode function --lenient ./abi.json addSideNode -p {} -p {} -p {}", sid, addr, ip_addr);
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -77,7 +77,7 @@ pub fn _encode_addSideNode(sid: U256, address: Address, ip_addr: String) -> Vec<
 }
 
 pub fn _encode_deleteSideNode(sid: U256, tid: U256) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json deleteSideNode -p {} -p {}", sid, tid);
+    let command = format!("./ethabi encode function --lenient ./abi.json deleteSideNode -p {} -p {}", sid, tid);
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -89,7 +89,7 @@ pub fn _encode_deleteSideNode(sid: U256, tid: U256) -> Vec<u8> {
 
 
 pub fn _encode_submitVote(block: String, sid: U256, bid: U256, sigx: U256, sigy: U256, bitset: U256) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {} -p {} -p {}", block, sid, bid, sigx, sigy, bitset);
+    let command = format!("./ethabi encode function --lenient ./abi.json submitVote -p {:?} -p {} -p {} -p {} -p {} -p {}", block, sid, bid, sigx, sigy, bitset);
     //println!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
@@ -100,7 +100,20 @@ pub fn _encode_submitVote(block: String, sid: U256, bid: U256, sigx: U256, sigy:
 }
 
 pub fn _encode_resetSideChain(sid: U256) -> Vec<u8> {
-    let command = format!("ethabi encode function --lenient ./abi.json resetSideChain -p {}", sid);
+    let command = format!("./ethabi encode function --lenient ./abi.json resetSideChain -p {}", sid);
+    let output = Command::new("sh").arg("-c")
+        .arg(command)
+        .output().unwrap();
+    //println!("{:?}", output);
+
+    let function_abi = hex::decode(std::str::from_utf8(&output.stdout).unwrap().trim()).unwrap();
+    return function_abi;
+}
+
+pub fn _encode_resetSideNode(sid: U256) -> Vec<u8> {
+    
+
+    let command = format!("./ethabi encode function --lenient ./abi.json deleteSideNode -p {}", sid, );
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -111,7 +124,7 @@ pub fn _encode_resetSideChain(sid: U256) -> Vec<u8> {
 }
 
 pub fn _decode_sendBlock(input: &str) -> (String, usize) {
-    let command = format!("ethabi decode params -t string -t bytes -t uint256 {}", input);
+    let command = format!("./ethabi decode params -t string -t bytes -t uint256 {}", input);
     let output = Command::new("sh").arg("-c")
         .arg(command)
         .output().unwrap();
@@ -124,8 +137,8 @@ pub fn _decode_sendBlock(input: &str) -> (String, usize) {
     (block, block_id)
 }
 
-pub fn _sign_bls(msg: String, key_file: String) -> (String, String) {
-    let command = format!("./sign -msg={} -key={}", msg, key_file);
+pub fn _sign_bls(msg: String, key_file: String, bin_path: &str) -> (String, String) {
+    let command = bin_path.to_string() + &format!( "/sign -msg={} -key={}", msg, key_file);
     //info!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)
@@ -151,8 +164,8 @@ pub fn _sign_bls(msg: String, key_file: String) -> (String, String) {
     //return (sig[0].to_string(), sig[1].to_string());
 //}
 
-pub fn _aggregate_sig(x1: String, y1: String, x2: String, y2: String)-> (String, String) {
-    let command = format!("./aggregate -x1={} -y1={} -x2={} -y2={}", x1, y1, x2, y2);
+pub fn _aggregate_sig(x1: String, y1: String, x2: String, y2: String, bin_dir: &str)-> (String, String) {
+    let command = bin_dir.to_string() + &format!("/aggregate -x1={} -y1={} -x2={} -y2={}", x1, y1, x2, y2);
     //info!("command {}", command.clone());
     let output = Command::new("sh").arg("-c")
         .arg(command)

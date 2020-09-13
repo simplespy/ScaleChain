@@ -441,9 +441,10 @@ impl TreeDecoder {
 
                     let mut transactions_byte: Vec<Bytes> = vec![];                   
                     let mut transactions: Vec<Transaction> = vec![];
-                    for d in 0..header.delimitor.len()-1 {
-                        let l = header.delimitor[d] as usize;
-                        let u = header.delimitor[d+1] as usize;
+                    let num_trans = bytes.len() / 316; //TODO magic
+                    for d in 0..(num_trans-1) {
+                        let l = d*316 as usize;
+                        let u = (d+1)*316 as usize;
                         let b: Bytes = bytes[l..u].into();
                         let t: Transaction = deserialize(&b as &[u8]).unwrap();
                         transactions_byte.push(b);
@@ -497,9 +498,10 @@ impl TreeDecoder {
 
                                     let mut transactions_byte: Vec<Bytes> = vec![];                   
                                     let mut transactions: Vec<Transaction> = vec![];
-                                    for d in 0..header.delimitor.len()-1 {
-                                        let l = header.delimitor[d] as usize;
-                                        let u = header.delimitor[d+1] as usize;
+                                    let num_trans = bytes.len() / 316; //TODO magic
+                                    for d in 0..(num_trans-1) {
+                                        let l = d*316 as usize;
+                                        let u = (d+1)*316 as usize;
                                         let b: Bytes = bytes[l..u].into();
                                         let t: Transaction = deserialize(&b as &[u8]).unwrap();
                                         transactions_byte.push(b);
@@ -553,9 +555,10 @@ impl TreeDecoder {
 
                     let mut transactions_byte: Vec<Bytes> = vec![];                   
                     let mut transactions: Vec<Transaction> = vec![];
-                    for d in 0..header.delimitor.len()-1 {
-                        let l = header.delimitor[d] as usize;
-                        let u = header.delimitor[d+1] as usize;
+                    let num_trans = bytes.len() / 316; //TODO magic
+                    for d in 0..(num_trans-1) {
+                        let l = d*316 as usize;
+                        let u = (d+1)*316 as usize;
                         let b: Bytes = bytes[l..u].into();
                         let t: Transaction = deserialize(&b as &[u8]).unwrap();
                         transactions_byte.push(b);
