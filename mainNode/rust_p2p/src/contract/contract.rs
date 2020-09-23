@@ -31,6 +31,7 @@ use crate::experiment::snapshot::PERFORMANCE_COUNTER;
 
 //use requests::{ToJson};
 use log::{info, warn, error};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 const ETH_CHAIN_ID: u32 = 42;
 
@@ -149,7 +150,6 @@ impl Contract {
                                 },
                                 Message::SubmitVote(header, sid, bid, sigx, sigy, bitset) => {
                                     self.submit_vote(header, sid, bid, sigx, sigy, bitset);
-                                    info!("{:?} submited to mainChain", self.ip_addr);
                                    // let header = _generate_random_header();
                                    // let (sigx, sigy) = _sign_bls(header.clone(), "node1".to_string());
                                    // let (sigx2, sigy2) = _sign_bls(header.clone(), "node2".to_string());
@@ -367,18 +367,19 @@ impl Contract {
         //if self.get_tx_receipt(tx_hash) {
             //println!("success tx_hash = {:?}", tx_hash);
         //}
-
+        let start = SystemTime::now();
         match self._send_transaction(signed_tx) {
             Ok(tx_hash) => {
                 if self.get_tx_receipt(tx_hash) {
-                    println!("tx_hash = {:?}", tx_hash);
+                    println!("block id {}. tx_hash = {:?}", bid.as_usize(), tx_hash);
                 }
             },
             Err(e) => {
                 info!("{:?} Error send_transaction {:?}", self.my_account.address , e);
             }
         }
-        PERFORMANCE_COUNTER.record_submit_block_stop();
+        PERFORMANCE_COUNTER.record_submit_block_stop(bid.as_usize());
+        info!("*******Submitted block time {:?}", start.elapsed());
     }
 
     pub fn send_block(&self, block: Block)  {

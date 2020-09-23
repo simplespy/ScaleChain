@@ -151,7 +151,7 @@ impl Performer {
             None => return false,
         };
 
-        info!("sender id {:?}; curr id {}", sender_id, curr_id);
+        //info!("sender id {:?}; curr id {}", sender_id, curr_id);
 
         if sender_id  == curr_id {
             true
@@ -316,6 +316,9 @@ impl Performer {
                 },
                 Message::ProposeBlock(proposer_addr, block_id, header) => {
                     if self.scale_id > 0 {
+                        //let (curr_slot, elapsed) = get_curr_slot(self.start_sec, self.start_millis, self.slot_time);
+                        //info!("recv Propose_block {:?}", elapsed);
+                        info!("recv Propose block {}", block_id);
                         let hash_str = utils::hash_header_hex(&header);
                         //info!("{:?} receive ProposeBlock: header hash: {:?}", self.addr, hash_str);
                         let local_addr = self.addr.clone();
@@ -330,11 +333,10 @@ impl Performer {
                             warn!("wrong block id {} != {} from {:?}", block_id, true_block_id, proposer_addr);
                             continue;
                         }
-
+                        PERFORMANCE_COUNTER.record_sign_block_update(block_id);
                         let (tx, rx) = channel::unbounded();
                         self.proposal_by.insert((proposer_addr, block_id), tx);
 
-                        let response_msg = Message::ScaleReqChunks;
                         let header_cmt: BlockHeader = deserialize(
                             &header.clone() as &[u8]
                             ).unwrap();
@@ -348,7 +350,7 @@ impl Performer {
                         let response_msg = Message::ScaleReqChunks(
                             proposer_addr, // scalenode addr 
                             block_id,
-                            samples_idx);
+                            self.scale_id);
                         peer_handle.write(response_msg);
 
                         let keyfile = self.key_file.clone();
@@ -362,9 +364,10 @@ impl Performer {
                         let contract_handler = self.contract_handler.clone();
                         let num_nodes = self.num_nodes;
                         let bin_dir = self.bin_dir.clone();
-                        let threshold = self.threshold as usize;
+                        let threshold = (UNDECODABLE_RATIO*(self.num_nodes as f32)).ceil() as usize ;
                         let local_contract_handler = self.contract_handler.clone();
-                        PERFORMANCE_COUNTER.record_sign_block_update(block_id);
+
+                        //info!(" {:?} start aggregating ", self.addr);
                         // timed loop
                         thread::spawn(move || {
                             let mut num_chunk = 0;
@@ -375,6 +378,7 @@ impl Performer {
                             loop {
                                 match rx.recv() {
                                     Ok(chunk_reply) => {
+                                        //info!(" {:?} get sample ", local_addr);
                                         let mut local_db = db.lock().unwrap();
                                         // compute id
                                         local_db.insert_cmt_sample(block_id, &chunk_reply);
@@ -412,7 +416,9 @@ impl Performer {
                                             (sigx.clone(), sigy.clone(), bitset.clone()));
                                         drop(aggsig);
                                         if utils::_count_sig(bitset.clone()) >= threshold {
-                                            PERFORMANCE_COUNTER.record_sign_block_stop();
+                                            //info!("{:?} first loop aggreg enough sig", local_addr);
+                                            info!("1. Sufficient Signture block {}", block_id);
+                                            PERFORMANCE_COUNTER.record_sign_block_stop(block_id as usize);
                                             PERFORMANCE_COUNTER.record_submit_block_update(block_id);
                                             let (answer_tx, answer_rx) = channel::bounded(1);
                                             let handle = Handle {
@@ -420,6 +426,9 @@ impl Performer {
                                                 answer_channel: Some(answer_tx),
                                             };
                                             local_contract_handler.send(handle);
+                                            //let mut aggsig = self.agg_sig.lock().unwrap();
+                                            //aggsig.remove(&header);
+                                            //drop(aggsig);
                                         }
                                     }
                                     break;
@@ -454,8 +463,11 @@ impl Performer {
                             bitset = bitset + (1 << scale_id);
                             aggsig.insert(header.clone(), (sigx.clone(), sigy.clone(), bitset.clone()));
                         }
+                        drop(aggsig);
                         if utils::_count_sig(bitset.clone()) >= threshold {
-                            PERFORMANCE_COUNTER.record_sign_block_stop();
+                            info!("2. Sufficient Signture block {}", bid);
+                            //info!("{:?} aggreg enough sig", self.addr);
+                            PERFORMANCE_COUNTER.record_sign_block_stop(bid as usize);
                             PERFORMANCE_COUNTER.record_submit_block_update(bid);
                             let (answer_tx, answer_rx) = channel::bounded(1);
                             let handle = Handle {
@@ -463,20 +475,22 @@ impl Performer {
                                 answer_channel: Some(answer_tx),
                             };
                             self.contract_handler.send(handle);
+                            let mut aggsig = self.agg_sig.lock().unwrap();
                             aggsig.remove(&header);
+                            drop(aggsig);
                         }
                     }
-                    drop(aggsig)
                 },
-                Message::ScaleReqChunks(proposer_addr, block_id, samples_idx) => {
-                    let sample_len = samples_idx.len();
+                Message::ScaleReqChunks(proposer_addr, block_id, sender_scale_id) => {
                     // this client needs to prepare chunks in response to 
+                    let start = SystemTime::now();
                     let mut mempool = self.mempool.lock().expect("lock mempool");
-                    let (header, symbols, idx) = mempool.sample_cmt(
+                    let (header, symbols, idx) = mempool.get_cmt_sample(
                         block_id,
-                        samples_idx);
+                        sender_scale_id);
+                    
                     drop(mempool);
-
+                    //info!("fetched samples for scale id {} for block id {}", sender_scale_id, block_id);
                     let header_bytes = serialize(&header);
                     let hash_str = utils::hash_header_hex(&header_bytes);
                     let symbols = Samples {
@@ -489,6 +503,7 @@ impl Performer {
                         block_id,
                         symbols);
                     peer_handle.write(response_msg);
+                    //info!("ScaleReq Response time {:?}", start.elapsed());
                 },
                 Message::ScaleReqChunksReply(proposer_addr, block_id, symbols) => {
                     if self.scale_id > 0 {

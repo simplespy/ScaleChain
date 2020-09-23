@@ -44,6 +44,7 @@ impl Samples {
     }
 }
 
+// prototype only, message can be made secured with crypto
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Message {
     Ping(String),
@@ -53,7 +54,7 @@ pub enum Message {
     PassToken(Token),
     //ip(pubkey) BlockHeader block_id //sender is client
     ProposeBlock(SocketAddr, u64, Vec<u8>), 
-    ScaleReqChunks(SocketAddr, u64, Vec<u32>), //(id), // sender is scalenode
+    ScaleReqChunks(SocketAddr, u64, u64), //(id, scale_id), // sender is scalenode
     ScaleReqChunksReply(SocketAddr, u64, Samples),
     MySign(String, u64, u64, String, String, u64),
     ScaleGetAllChunks(ContractState), // blockheader

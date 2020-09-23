@@ -78,7 +78,8 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                     Some(chunk) => {
                         let elapsed = start.elapsed();
                         let hash_str = utils::hash_header_hex(&chunk.header as &[u8]);
-                        //info!("{:?} get hash_str  {:?} {:?}", job_manager.addr, hash_str, elapsed);
+                        //info!("{:?} get hash_str  {:?} {:?}", job_manager.addr, hash_str);
+
                         let header: BlockHeader = deserialize(&chunk.header as &[u8]).unwrap();
 
                         let num_layer = job_manager.k_set.len();
@@ -114,10 +115,11 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                                 &header.coded_merkle_roots_hashes
                             );
 
-                            let start = SystemTime::now();
+                            //let start = SystemTime::now();
+                            //info!("{:?} before cmt decoding {:?}", job_manager.addr, job_manager.state.block_id);
                             match decoder.run_tree_decoder(coll_symbols.clone(), coll_idx.clone(), header.clone()) {
                                 Ok(transactions) => {
-                                    info!("{:?} cmt pass decoding time {:?}", job_manager.addr, start.elapsed());
+                                    //info!("{:?} cmt pass decoding time {:?}", job_manager.addr, start.elapsed());
                                     // collect all base + reconstruct block
                                     let mut recon:Vec<u8> = vec![];
                                     let systematic_symbol_len = job_manager.k_set[0];
@@ -131,6 +133,9 @@ fn collect_cmt_chunks(job_manager: JobManager) {
                                             }
                                         }
                                     }
+                                    //info!("************finish block with {}", job_manager.state.block_id);
+                                    PERFORMANCE_COUNTER.record_coll_block_stop(job_manager.state.block_id as usize);
+                                    
                                     PERFORMANCE_COUNTER.record_confirmeded_transactions(transactions.len());
                                     // TODO
                                     let mut r = SBlock {
@@ -295,11 +300,11 @@ impl Manager {
                     }
                 }
 
-                let interval = time::Duration::from_millis(100);
+                let interval = time::Duration::from_millis(80);
                 thread::sleep(interval);
 
                 // check state every  sec
-                if start.elapsed().unwrap() > time::Duration::from_millis(2000) {
+                //if start.elapsed().unwrap() > time::Duration::from_millis(2000) {
                     //check current state
                     //info!("{:?} check smart contract", self.addr);
                     start = SystemTime::now();
@@ -316,16 +321,21 @@ impl Manager {
                                 Answer::Success(resp) => {
                                     match resp {
                                         ContractResponse::GetCurrState(state) => {
-                                            let mut mempool = self.mempool.lock().unwrap();
-                                            mempool.remove_block(state.block_id);
+                                            
                                             let mut local_chain = self.chain.lock().unwrap();
                                             let tip_state = local_chain.get_latest_state().expect("blockchain does not have state");
                                             drop(local_chain);
                                             // Ask performer to do the task
                                             if tip_state != state {
+                                                PERFORMANCE_COUNTER.record_block_stop(state.block_id);
+                                                //let mut mempool = self.mempool.lock().unwrap();
+                                                //mempool.remove_block(state.block_id);
+                                                //drop(mempool);
+                                                
                                                 if (false) {
                                                     // if get correct block from side chain network
                                                 } else {
+                                                    //info!("*********Fetch a new state tip {:?} smart {:?}", tip_state, state);
                                                     // if task is already handled
                                                     if self.chunk_senders.contains_key(&state.block_id) {
                                                         continue;
@@ -334,6 +344,7 @@ impl Manager {
                                                     if longest_id < state.block_id {
                                                         longest_id = state.block_id;
                                                     }
+                                                    PERFORMANCE_COUNTER.record_coll_block_update(state.block_id);
 
                                                     // get block from scale node network
                                                     let (chunk_sender, chunk_receiver) = crossbeam::channel::unbounded();
@@ -362,7 +373,6 @@ impl Manager {
                                                     //info!("{:?} broadcase ScaleGetAllChunks {:?}", self.addr, state);
                                                     let signal = ServerSignal::ServerBroadcast(response_msg);
                                                     self.server_control_sender.send(signal);
-
                                                 }
                                             }
                                         },
@@ -374,7 +384,7 @@ impl Manager {
                         },
                         Err(e) => panic!("performer contract channel broke"), 
                     }
-                }
+                //}
             }
         });
     }

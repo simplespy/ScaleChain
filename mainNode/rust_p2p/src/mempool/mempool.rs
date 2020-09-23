@@ -66,7 +66,9 @@ pub struct Mempool {
     contract_handler: Sender<Handle>,
     schedule_handler: Sender<scheduler::Signal>,
     returned_blocks: VecDeque<Block>,
-    block_by: HashMap<u64, CMTBlock>,
+    symbols_by: HashMap<u64, HashMap<u64, (Vec<Vec<Symbol>>, Vec<Vec<u64>>) > >,
+    headers_by: HashMap<u64, BlockHeader>,
+    //block_by: HashMap<u64, CMTBlock>,
     addr: SocketAddr,
     codes_for_encoding: Vec<Code>,
     codes_for_decoding: Vec<Code>,
@@ -87,10 +89,12 @@ impl Mempool {
             contract_handler: contract_handler,
             schedule_handler: schedule_handler,
             returned_blocks: VecDeque::new(),
-            block_by: HashMap::new(),
+            symbols_by: HashMap::new(),
+            //block_by: HashMap::new(),
             addr: addr,
             codes_for_encoding: codes_for_encoding,
             codes_for_decoding: codes_for_decoding,
+            headers_by: HashMap::new(),
         } 
     }
 
@@ -107,8 +111,8 @@ impl Mempool {
         self.block_size = size;
     }
 
-    pub fn get_num_transaction(&self) -> usize {
-        return self.transactions.len();
+    pub fn get_num_transaction(&self) -> u64 {
+        return self.transactions.len() as u64;
     }
 
     // TODO change the height in the header, but leave to future when tx has meaning
@@ -116,45 +120,98 @@ impl Mempool {
         self.returned_blocks.push_back(block);
     }
 
-    pub fn sample_cmt(&mut self, 
+    pub fn insert_symbols(
+        &mut self, 
         block_id: u64, 
-        sample_idx: Vec<u32>,
-    )-> (BlockHeader, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
-        match self.block_by.get(&block_id) {
-            None => panic!("I don't have cmt block"),
-            Some(cmt_block) => {
-                let num = sample_idx.len();
-                let (mut symbols, mut idx) = cmt_block.sample_vec(sample_idx);
-
-                //info!("{:?}, symbols {:?}", self.addr, symbols);
-                //info!("{:?}, idx     {:?}", self.addr,idx);
-
-                let mut decoder: TreeDecoder = TreeDecoder::new(
-                    self.codes_for_decoding.to_vec(), 
-                    &cmt_block.block_header.coded_merkle_roots_hashes
-                );
-
-                //info!("{:?}, test treedecoder n {} height {}", self.addr, decoder.n, decoder.height);
-                //match decoder.run_tree_decoder(symbols.clone(), idx.clone(), cmt_block.block_header.clone()) {
-                    //Ok(transactions) => {
-                        //println!("transactions {:?}", transactions);
-
-                    //},
-                    //_ => info!("tree decoder error"),
-                //};
-                //info!("{:?} after calling tree decoder", self.addr);
-                (cmt_block.block_header.clone(), symbols, idx)
-            }
-        }
+        block_header: &BlockHeader,
+        symbols_by_scale_id: HashMap<u64, (Vec<Vec<Symbol>>, Vec<Vec<u64>>)>
+    ) {
+        self.headers_by.insert(block_id, block_header.clone());
+        self.symbols_by.insert(block_id, symbols_by_scale_id);
     }
+
+    pub fn get_cmt_sample(&mut self, block_id: u64, scale_id: u64) 
+        -> (BlockHeader, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
+         match self.symbols_by.get(&block_id) {
+            Some(symbols_by) => {
+                match symbols_by.get(&scale_id) {
+                    Some((s, i)) => {
+                        let header = match self.headers_by.get(&block_id) {
+                            Some(h) => h.clone(),
+                            None => {
+                                info!("I don't have cmt header for block id {}", block_id);
+                                unreachable!();
+                            },
+                        };
+                        return (header, s.clone(), i.clone())
+                    },
+                    None => {
+                        info!("I have cmt symbols for block id {}, but not have for scale node {}", block_id, scale_id);
+                        unreachable!();
+                    }
+                }
+            },
+            None => {
+                info!("I don't have cmt symbols for block id {}", block_id);
+                unreachable!();
+            }
+         }
+    }
+
+    //pub fn sample_cmt(&mut self, 
+        //block_id: u64, 
+        //sample_idx: Vec<u32>,
+    //)-> (BlockHeader, Vec<Vec<Symbol>>, Vec<Vec<u64>>) {
+        //match self.block_by.get(&block_id) {
+            //None => {
+                //info!("I don't have cmt block {}", block_id);
+                //unreachable!();
+            //},
+            //Some(cmt_block) => {
+                //let num = sample_idx.len();
+                //let (mut symbols, mut idx) = cmt_block.sample_vec(sample_idx);
+
+                ////info!("{:?}, symbols {:?}", self.addr, symbols);
+                ////info!("{:?}, idx     {:?}", self.addr,idx);
+
+                ////let mut decoder: TreeDecoder = TreeDecoder::new(
+                    ////self.codes_for_decoding.to_vec(), 
+                    ////&cmt_block.block_header.coded_merkle_roots_hashes
+                ////);
+
+                ////info!("{:?}, test treedecoder n {} height {}", self.addr, decoder.n, decoder.height);
+                ////match decoder.run_tree_decoder(symbols.clone(), idx.clone(), cmt_block.block_header.clone()) {
+                    ////Ok(transactions) => {
+                        ////println!("transactions {:?}", transactions);
+
+                    ////},
+                    ////_ => info!("tree decoder error"),
+                ////};
+                ////info!("{:?} after calling tree decoder", self.addr);
+                //(cmt_block.block_header.clone(), symbols, idx)
+            //}
+        //}
+    //}
+
+    //pub fn update_block_id(&mut self, new_id: u64, old_id: u64) {
+        //info!("update a block id from {} to {}", old_id, new_id);
+        //warn!("consider to increase slot time, block generation too fast");
+        //match self.block_by.get(&old_id) {
+            //None => panic!("cannot update block id,I don't have cmt block"),
+            //Some(cmt_block) => {
+                //self.block_by.insert(new_id, cmt_block.clone());
+                //self.block_by.remove(&old_id);
+            //}
+        //}
+    //}
 
     // currently a hack, need to combine with sample_cmt
-    pub fn get_cmt_header(&self, block_id: u64) -> BlockHeader {
-        match &self.block_by.get(&block_id) {
-            None => panic!("I don't have cmt block"),
-            Some(cmt_block) => cmt_block.block_header.clone(),
-        }
-    }
+    //pub fn get_cmt_header(&self, block_id: u64) -> BlockHeader {
+        //match &self.block_by.get(&block_id) {
+            //None => panic!("I don't have cmt block"),
+            //Some(cmt_block) => cmt_block.block_header.clone(),
+        //}
+    //}
 
     pub fn package_trans(&mut self, transactions: &mut Vec<Transaction>) {
         let tx_bytes_size = self.transaction_size_in_bytes();
@@ -187,44 +244,50 @@ impl Mempool {
         //}
     }
 
-    pub fn prepare_cmt_block(&mut self, block_id: u64) -> Option<BlockHeader> {
-        let mut rng = rand::thread_rng();
-
-        // get CMT
-        let header = BlockHeader {
-            version: 1,
-            previous_header_hash: CMTH256::default(),
-            merkle_root_hash: CMTH256::default(),
-            time: 4u32,
-            bits: 5.into(),
-            nonce: rng.gen(),
-            coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
-        };
-        // CMT - propose block
-        // let transaction_size = Transaction::bytes(&self.transactions[0]).len();
-        // info!("{:?} transaction_size {:?}", self.addr, transaction_size);
-
+    pub fn prepare_transaction_block(&mut self) -> Vec<Transaction>{
         let mut transactions: Vec<Transaction> = Vec::new();
         self.package_trans(&mut transactions);
-        info!("num trans in block {}", transactions.len());
-
-        let start = SystemTime::now();
-        // autopad transactions
-        let (block, trans_len) = CMTBlock::new(
-            header.clone(), 
-            &transactions, 
-            BLOCK_SIZE as usize, 
-            HEADER_SIZE, 
-            &self.codes_for_encoding, 
-            vec![true; self.codes_for_encoding.len()]
-        );
-        //PERFORMANCE_COUNTER.record_generated_transaction();
-
-        let cmt_header = block.block_header.clone();
-        self.block_by.insert(block_id, block);
-
-        return Some(cmt_header);
+        transactions
     }
+
+    //pub fn prepare_cmt_block(&mut self, block_id: u64) -> Option<BlockHeader> {
+        //let mut rng = rand::thread_rng();
+
+        //// get CMT
+        //let header = BlockHeader {
+            //version: 1,
+            //previous_header_hash: CMTH256::default(),
+            //merkle_root_hash: CMTH256::default(),
+            //time: 4u32,
+            //bits: 5.into(),
+            //nonce: rng.gen(),
+            //coded_merkle_roots_hashes: vec![CMTH256::default(); 8],
+        //};
+        //// CMT - propose block
+        //// let transaction_size = Transaction::bytes(&self.transactions[0]).len();
+        //// info!("{:?} transaction_size {:?}", self.addr, transaction_size);
+
+        //let mut transactions: Vec<Transaction> = Vec::new();
+        //self.package_trans(&mut transactions);
+        //info!("num trans in block {}", transactions.len());
+
+        //let start = SystemTime::now();
+        //// autopad transactions
+        //let (block, trans_len) = CMTBlock::new(
+            //header.clone(), 
+            //&transactions, 
+            //BLOCK_SIZE as usize, 
+            //HEADER_SIZE, 
+            //&self.codes_for_encoding, 
+            //vec![true; self.codes_for_encoding.len()]
+        //);
+        ////PERFORMANCE_COUNTER.record_generated_transaction();
+
+        //let cmt_header = block.block_header.clone();
+        ////self.block_by.insert(block_id, block);
+
+        //return Some(cmt_header);
+    //}
 
     pub fn len(&self) -> usize {
         self.transactions.len()
@@ -232,7 +295,8 @@ impl Mempool {
 
     pub fn remove_block(&mut self, block_id: u64) {
         info!("mempool remove {}", block_id);
-        self.block_by.remove(&block_id);
+        self.symbols_by.remove(&block_id);
+        self.headers_by.remove(&block_id);
     }
 
     

@@ -31,6 +31,7 @@ use system_rust::contract::interface::Response as ContractResponse;
 use system_rust::contract::utils::{BLSKey, BLSKeyStr};
 use system_rust::primitive::block::{ContractState};
 use web3::types::Address;
+use system_rust::experiment::snapshot::PERFORMANCE_COUNTER;
 
 fn main() {
     env_logger::init();
@@ -211,6 +212,8 @@ fn main() {
     let start_sec: u64 = start_time.floor() as u64;
     let start_millis: u64 = ((start_time - start_time.floor())*1000.0).floor() as u64;
 
+    PERFORMANCE_COUNTER.record_scale_id(scale_id as usize);
+
     info!("sec    {}", start_sec);
     info!("millis {}", start_millis);
 
@@ -343,8 +346,11 @@ fn main() {
         slot_time,
         start_sec,
         start_millis,
+        num_scale,
+        codes_for_encoding.clone(),
     );
     if scale_id == 0 {
+
         scheduler.start();
     }
     contract.start();

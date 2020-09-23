@@ -32,6 +32,8 @@ pub const UNDECODABLE_RATIO: f32 = 0.9; // > 1 - 0.124
 //size of transactions in a block in bytes
 pub const BLOCK_SIZE: u64 = 4194304;//4194304 //65536;//;16384  131072//131072;//131072;//;//131072; //32768;//10000;//131072; 40000 65535 4800 65535
 
+pub const TRANSACTION_SIZE: u64 = 316;
+
 //size of a symbol on the base layer in bytes
 pub const BASE_SYMBOL_SIZE: usize = 32768;//32768;//32768;//1024;//32768;//1024;
 

@@ -1,4 +1,4 @@
-use constants::{BASE_SYMBOL_SIZE, AGGREGATE, RATE, HEADER_SIZE};
+use constants::{BASE_SYMBOL_SIZE, AGGREGATE, RATE, HEADER_SIZE, TRANSACTION_SIZE};
 use std::cmp;
 use std::ops::BitXor;
 use {Symbols, SymbolBase, SymbolUp};
@@ -441,10 +441,10 @@ impl TreeDecoder {
 
                     let mut transactions_byte: Vec<Bytes> = vec![];                   
                     let mut transactions: Vec<Transaction> = vec![];
-                    let num_trans = bytes.len() / 316; //TODO magic
+                    let num_trans = bytes.len() / TRANSACTION_SIZE as usize; //TODO magic
                     for d in 0..(num_trans-1) {
-                        let l = d*316 as usize;
-                        let u = (d+1)*316 as usize;
+                        let l = d*TRANSACTION_SIZE as usize;
+                        let u = (d+1)*TRANSACTION_SIZE as usize;
                         let b: Bytes = bytes[l..u].into();
                         let t: Transaction = deserialize(&b as &[u8]).unwrap();
                         transactions_byte.push(b);
@@ -498,10 +498,10 @@ impl TreeDecoder {
 
                                     let mut transactions_byte: Vec<Bytes> = vec![];                   
                                     let mut transactions: Vec<Transaction> = vec![];
-                                    let num_trans = bytes.len() / 316; //TODO magic
+                                    let num_trans = bytes.len() / TRANSACTION_SIZE as usize; //TODO magic
                                     for d in 0..(num_trans-1) {
-                                        let l = d*316 as usize;
-                                        let u = (d+1)*316 as usize;
+                                        let l = d*TRANSACTION_SIZE as usize;
+                                        let u = (d+1)*TRANSACTION_SIZE as usize;
                                         let b: Bytes = bytes[l..u].into();
                                         let t: Transaction = deserialize(&b as &[u8]).unwrap();
                                         transactions_byte.push(b);
@@ -555,10 +555,10 @@ impl TreeDecoder {
 
                     let mut transactions_byte: Vec<Bytes> = vec![];                   
                     let mut transactions: Vec<Transaction> = vec![];
-                    let num_trans = bytes.len() / 316; //TODO magic
+                    let num_trans = bytes.len() / TRANSACTION_SIZE as usize; //TODO magic
                     for d in 0..(num_trans-1) {
-                        let l = d*316 as usize;
-                        let u = (d+1)*316 as usize;
+                        let l = d*TRANSACTION_SIZE as usize;
+                        let u = (d+1)*TRANSACTION_SIZE as usize;
                         let b: Bytes = bytes[l..u].into();
                         let t: Transaction = deserialize(&b as &[u8]).unwrap();
                         transactions_byte.push(b);
